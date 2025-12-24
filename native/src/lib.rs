@@ -1,3 +1,13 @@
+//! # Native JNI Bridge for Spark Pub/Sub Connector
+//!
+//! This module provides the JNI (Java Native Interface) implementation for the Spark Pub/Sub connector.
+//! It acts as the orchestration layer between Spark's JVM and the high-performance Rust data plane.
+//!
+//! Key roles:
+//! 1. **FFI Orchestration**: Manages the Apache Arrow C Data Interface (FFI) for zero-copy data transfer.
+//! 2. **Context Management**: Handles the lifecycle of Tokio runtimes and gRPC clients across JNI calls.
+//! 3. **Type Translation**: Converts between JNI/Java types and Rust types using `robusta_jni`.
+
 use robusta_jni::bridge;
 
 mod pubsub;
@@ -7,8 +17,10 @@ use pubsub::PubSubClient;
 use tokio::runtime::Runtime;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 
-// ABI-compatible mirrors for Arrow FFI structures. 
-// These are used to access private fields or to implement "Peek" mode (noop release).
+/// ABI-compatible mirrors for Arrow FFI structures. 
+/// These are used to validate memory layouts and pointers before importing them into `arrow-rs`.
+/// They are necessary because the official `FFI_ArrowSchema` and `FFI_ArrowArray` do not expose 
+/// all internal fields needed for proactive validation.
 #[repr(C)]
 pub struct FFI_ArrowSchema_Mirror {
     pub format: *const std::ffi::c_char,
@@ -57,6 +69,8 @@ mod jni {
     use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
     use arrow::array::{Array, StructArray};
     
+    /// JNI wrapper for `NativeReader` on the Scala side.
+    /// Manages message ingestion from Pub/Sub and conversion to Arrow batches.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
     #[package(com.google.cloud.spark.pubsub)]
     pub struct NativeReader<'env: 'borrow, 'borrow> {
@@ -66,6 +80,8 @@ mod jni {
 
     impl<'env: 'borrow, 'borrow> NativeReader<'env, 'borrow> {
         
+        /// Initializes a new `PubSubClient` and background `StreamingPull` task.
+        /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader` which holds the client and runtime.
         pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, subscription_id: String) -> jlong {
             let rt = Runtime::new().expect("Failed to create Tokio runtime");
             
@@ -88,6 +104,9 @@ mod jni {
             }
         }
 
+        /// Fetches the next batch of messages from the background queue, converts them to an Arrow batch,
+        /// and exports them directly into the memory addresses provided by Spark (out_array, out_schema).
+        /// Returns 1 if a batch was produced, 0 if no messages are available, or a negative error code.
         pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, out_array: jlong, out_schema: jlong) -> i32 {
             if reader_ptr == 0 {
                 return -1;
@@ -141,11 +160,32 @@ mod jni {
             1
         }
 
-        pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids_arr: Box<[String]>) -> i32 {
+        /// Sends an asynchronous Acknowledgment request for a list of message IDs.
+        /// This is used for "At-Least-Once" delivery guarantees in Spark.
+        pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids: Vec<String>) -> i32 {
+             eprintln!("Rust: acknowledge called with {} ids", ack_ids.len());
              if reader_ptr == 0 {
                  return -1;
              }
              let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
+             
+             let res = reader.rt.block_on(async {
+                 reader.client.acknowledge(ack_ids).await
+             });
+             
+             match res {
+                 Ok(_) => {
+                     eprintln!("Rust: acknowledge success");
+                     1
+                 },
+                 Err(e) => {
+                     eprintln!("Rust: Failed to acknowledge batch: {:?}", e);
+                     0
+                 }
+             }
+        }
+
+        /// Destroys the `RustPartitionReader` and shuts down its Tokio runtime.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             if reader_ptr != 0 {
                 let _ = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
@@ -153,6 +193,8 @@ mod jni {
         }
     }
 
+    /// JNI wrapper for `NativeWriter` on the Scala side.
+    /// Manages message publishing from Arrow batches to Pub/Sub.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
     #[package(com.google.cloud.spark.pubsub)]
     pub struct NativeWriter<'env: 'borrow, 'borrow> {
@@ -161,6 +203,8 @@ mod jni {
     }
 
     impl<'env: 'borrow, 'borrow> NativeWriter<'env, 'borrow> {
+        /// Initializes a new `PublisherClient` with the given project and topic.
+        /// Returns a raw pointer (as `jlong`) to a `RustPartitionWriter`.
         pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String) -> jlong {
             let rt = Runtime::new().expect("Failed to create Tokio runtime for writer");
             
@@ -183,6 +227,8 @@ mod jni {
             }
         }
 
+        /// Takes an Arrow batch from Spark via its C memory addresses, converts it to Pub/Sub messages,
+        /// and publishes them to the configured topic.
         pub extern "jni" fn writeBatch(self, _env: &JNIEnv, writer_ptr: jlong, arrow_array_addr: jlong, arrow_schema_addr: jlong) -> i32 {
             if writer_ptr == 0 {
                 return -1;
@@ -295,11 +341,13 @@ mod jni {
 
 
 
+/// Internal state for a Spark partition reader, including its dedicated Tokio runtime.
 pub struct RustPartitionReader {
     rt: Runtime,
     client: PubSubClient,
 }
 
+/// Internal state for a Spark partition writer, including its dedicated Tokio runtime.
 pub struct RustPartitionWriter {
     rt: Runtime,
     client: crate::pubsub::PublisherClient,

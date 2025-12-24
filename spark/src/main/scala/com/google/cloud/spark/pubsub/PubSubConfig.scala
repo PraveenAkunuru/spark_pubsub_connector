@@ -1,5 +1,8 @@
 package com.google.cloud.spark.pubsub
 
+/**
+ * Constants and configuration keys for the Pub/Sub connector.
+ */
 object PubSubConfig {
   val PROJECT_ID_KEY = "projectId"
   val SUBSCRIPTION_ID_KEY = "subscriptionId"

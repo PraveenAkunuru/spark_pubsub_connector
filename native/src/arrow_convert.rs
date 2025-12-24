@@ -1,4 +1,14 @@
-// Module for converting Pub/Sub messages to Arrow format
+//! # Arrow Conversion Logic
+//!
+//! This module handles the transformation between Google Cloud Pub/Sub messages
+//! and Apache Arrow `RecordBatch` structures.
+//!
+//! Why this module exists:
+//! - **Performance**: Arrow is a columnar memory format that allows Spark to process data extremely efficiently.
+//! - **Standardization**: By converting Pub/Sub messages to Arrow in native code, we provide a structured,
+//!   binary-compatible format for Spark without JVM overhead for parsing.
+//! - **Schema Mapping**: Defines how Pub/Sub metadata (message ID, publish time) is mapped to Arrow fields.
+
 use arrow::array::{ArrayRef, BinaryBuilder, StringBuilder, TimestampMicrosecondBuilder};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
@@ -6,7 +16,8 @@ use std::sync::Arc;
 
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
 
-/// Builder for creating Arrow RecordBatches from Pub/Sub messages.
+/// Builder for converting a stream of `ReceivedMessage` objects into an Arrow batch.
+/// Each field (message_id, publish_time, payload, ack_id) is managed by its own columnar builder.
 pub struct ArrowBatchBuilder {
     message_ids: StringBuilder,
     publish_times: TimestampMicrosecondBuilder,
@@ -25,6 +36,7 @@ impl ArrowBatchBuilder {
         }
     }
     
+    /// Appends a single `ReceivedMessage` (including its data and metadata) to the columnar builders.
     pub fn append(&mut self, recv_msg: &ReceivedMessage) {
         let msg = recv_msg.message.as_ref().expect("ReceivedMessage must have a message");
         self.message_ids.append_value(&msg.message_id);
@@ -42,6 +54,7 @@ impl ArrowBatchBuilder {
         // Attributes TODO
     }
 
+    /// Finalizes the builders and returns the Arrow arrays and corresponding schema.
     pub fn finish(&mut self) -> (Vec<ArrayRef>, SchemaRef) {
         let message_id_array = Arc::new(self.message_ids.finish()) as ArrayRef;
         let publish_time_array = Arc::new(self.publish_times.finish()) as ArrayRef;
@@ -65,6 +78,8 @@ impl ArrowBatchBuilder {
 use arrow::array::{StructArray, BinaryArray, StringArray, BooleanArray, Int32Array, Int64Array, Float32Array, Float64Array, TimestampMicrosecondArray, Array};
 use std::collections::HashMap;
 
+/// Reader for converting Arrow `StructArray`s back into `PubsubMessage` objects for publishing.
+/// It dynamically maps Arrow columns to Pub/Sub message fields and attributes.
 pub struct ArrowBatchReader<'a> {
     array: &'a StructArray,
 }
@@ -74,6 +89,8 @@ impl<'a> ArrowBatchReader<'a> {
         Self { array }
     }
     
+    /// Converts the entire Arrow batch into a vector of `PubsubMessage`s.
+    /// Columns not matching core fields (payload, message_id, etc.) are converted to message attributes.
     pub fn to_pubsub_messages(&self) -> Result<Vec<PubsubMessage>, Box<dyn std::error::Error>> {
         let num_rows = self.array.len();
         let mut messages = Vec::with_capacity(num_rows);

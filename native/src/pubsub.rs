@@ -1,3 +1,14 @@
+//! # Pub/Sub Native Client Implementation
+//!
+//! This module provides the gRPC-based Pub/Sub client for the Spark connector.
+//! It is architected for high performance, using a background task to manage
+//! a long-lived `StreamingPull` connection for low-latency ingestion.
+//!
+//! Why a separate module?
+//! - **Separation of Concerns**: Decouples gRPC/Tokio logic from JNI bridge code.
+//! - **Async Orchestration**: Allows for background buffering of messages independently of JNI calls.
+//! - **Testability**: Enables easier mocking or direct unit testing of the data plane.
+
 use google_cloud_googleapis::pubsub::v1::subscriber_client::SubscriberClient;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_auth::project::Config;
@@ -14,9 +25,8 @@ use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
 use google_cloud_googleapis::pubsub::v1::StreamingPullRequest;
 use tokio::sync::mpsc::Sender;
 
-/// Client for interacting with Google Cloud Pub/Sub via gRPC.
-/// 
-/// This client uses `StreamingPull` to efficiently buffer messages in the background.
+/// A low-latency subscriber client that manages a background `StreamingPull` task.
+/// It uses a bounded MPSC channel to buffer messages received from the gRPC stream.
 pub struct PubSubClient {
     /// Receiver for buffered messages from the background task.
     receiver: Receiver<ReceivedMessage>,
@@ -27,6 +37,7 @@ pub struct PubSubClient {
 // ... (skip create_channel_and_header)
 
 impl PubSubClient {
+    /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
     pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         eprintln!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
         let (channel, header_val) = create_channel_and_header().await?;
@@ -113,20 +124,29 @@ impl PubSubClient {
         })
     }
 
+    /// Drains up to `batch_size` messages from the internal buffer.
+    /// This is non-blocking and will return early if the buffer is empty or the timeout is reached.
     pub async fn fetch_batch(&mut self, batch_size: usize) -> Vec<ReceivedMessage> {
-        // eprintln!("Rust: fetch_batch called. Requesting max {} messages", batch_size);
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size {
              match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
-                 Ok(Some(msg)) => batch.push(msg),
-                 Ok(None) => break, // closed
+                 Ok(Some(msg)) => {
+                     eprintln!("Rust: Received message from channel: {}", msg.ack_id);
+                     batch.push(msg);
+                 },
+                 Ok(None) => {
+                     eprintln!("Rust: Receiver channel closed");
+                     break;
+                 },
                  Err(_) => break, // timeout
              }
         }
         batch
     }
     
+    /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
     pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        eprintln!("Rust: Sending ack request for {} ids", ack_ids.len());
         if ack_ids.is_empty() {
             return Ok(());
         }
@@ -136,11 +156,36 @@ impl PubSubClient {
         };
         // We use the sender to send this request into the stream
         self.sender.send(req).await.map_err(|e| format!("Failed to send Ack request: {}", e))?;
+        eprintln!("Rust: Ack request sent to stream");
         Ok(())
     }
 }
 
-/// Client for publishing messages to Google Cloud Pub/Sub via gRPC.
+/// Helper to create a gRPC channel and optional Auth header.
+/// If `PUBSUB_EMULATOR_HOST` is set, it bypasses Auth and connects to the emulator.
+async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
+    let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
+    let (channel, header_val) = if let Some(host) = emulator_host {
+        eprintln!("Rust: Using emulator host: {}", host);
+        let channel = Channel::from_shared(format!("http://{}", host))?
+            .connect()
+            .await?;
+        (channel, None)
+    } else {
+        let config = google_cloud_auth::project::Config::default();
+        let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
+        let token_source = ts.token_source();
+        let channel = Channel::from_shared("https://pubsub.googleapis.com")?
+            .connect()
+            .await?;
+        let token = token_source.token().await?;
+        let header_val = MetadataValue::from_str(&format!("Bearer {}", token))?;
+        (channel, Some(header_val))
+    };
+    Ok((channel, header_val))
+}
+
+/// High-performance publisher client that sends batches of messages via gRPC.
 pub struct PublisherClient {
     client: google_cloud_googleapis::pubsub::v1::publisher_client::PublisherClient<Channel>,
     topic: String,
@@ -166,6 +211,7 @@ impl PublisherClient {
         })
     }
     
+    /// Publishes a batch of messages to the configured topic in a single gRPC request.
     pub async fn publish_batch(&mut self, messages: Vec<PubsubMessage>) -> Result<(), Box<dyn std::error::Error>> {
         if messages.is_empty() {
              return Ok(());

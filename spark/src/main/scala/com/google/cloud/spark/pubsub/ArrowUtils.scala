@@ -4,7 +4,19 @@ import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.apache.spark.sql.types._
 import scala.collection.JavaConverters._
 
+/**
+ * Utility functions for bridging Spark's InternalRow and Apache Arrow's FieldVectors.
+ *
+ * It provides core logic for:
+ * 1. **Schema Translation**: Mapping Spark SQL types to Arrow types.
+ * 2. **Value Mapping**: Transferring row values between Spark's `InternalRow` and Arrow's `FieldVector`s.
+ *
+ * This utility ensures that data is represented consistently across the JVM and Native boundaries.
+ */
 object ArrowUtils {
+  /**
+   * Converts a Spark `StructType` schema into an equivalent Apache Arrow `Schema`.
+   */
   def toArrowSchema(sparkSchema: StructType): Schema = {
     val fields = sparkSchema.fields.map { f =>
       val arrowType = f.dataType match {
@@ -26,6 +38,9 @@ object ArrowUtils {
     new Schema(fields.toList.asJava)
   }
 
+  /**
+   * Transfers a single value from a Spark `InternalRow` into an Arrow `FieldVector`.
+   */
   def setValue(v: org.apache.arrow.vector.FieldVector, dataType: DataType, record: org.apache.spark.sql.catalyst.InternalRow, pos: Int, rowCount: Int): Unit = {
     import org.apache.arrow.vector._
     if (record.isNullAt(pos)) {
@@ -47,6 +62,9 @@ object ArrowUtils {
     }
   }
 
+  /**
+   * Extracts a single value from an Arrow `FieldVector` and returns it in a format compatible with Spark.
+   */
   def getValue(v: org.apache.arrow.vector.FieldVector, pos: Int): Any = {
     import org.apache.arrow.vector._
     if (v.isNull(pos)) return null
@@ -57,6 +75,8 @@ object ArrowUtils {
       case binary: VarBinaryVector =>
         binary.get(pos)
       case ts: TimeStampMicroTZVector =>
+        ts.get(pos)
+      case ts: TimeStampMicroVector =>
         ts.get(pos)
       case bit: BitVector =>
         bit.get(pos) != 0

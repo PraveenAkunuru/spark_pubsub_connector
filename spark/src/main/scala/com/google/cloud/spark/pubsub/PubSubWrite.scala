@@ -6,14 +6,23 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.catalyst.InternalRow
 import scala.collection.JavaConverters._
 
+/**
+ * Builder for creating a `PubSubWrite` operation.
+ */
 class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) extends WriteBuilder {
   override def build(): Write = new PubSubWrite(schema, options)
 }
 
+/**
+ * Defines a structural write operation to Pub/Sub.
+ */
 class PubSubWrite(schema: StructType, options: CaseInsensitiveStringMap) extends Write {
   override def toBatch: BatchWrite = new PubSubBatchWrite(schema, options)
 }
 
+/**
+ * Orchestrates batch writing across executors.
+ */
 class PubSubBatchWrite(schema: StructType, options: CaseInsensitiveStringMap) extends BatchWrite {
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
     new PubSubDataWriterFactory(schema, options.asCaseSensitiveMap().asScala.toMap)
@@ -23,12 +32,23 @@ class PubSubBatchWrite(schema: StructType, options: CaseInsensitiveStringMap) ex
   override def abort(messages: Array[WriterCommitMessage]): Unit = {}
 }
 
+/**
+ * Factory class that initializes `PubSubDataWriter` on Spark executors.
+ */
 class PubSubDataWriterFactory(schema: StructType, options: Map[String, String]) extends DataWriterFactory {
   override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
     new PubSubDataWriter(partitionId, taskId, schema, options)
   }
 }
 
+/**
+ * The core data writer that runs on Spark executors.
+ *
+ * It manages:
+ * 1. **Buffering**: Accumulating Spark `InternalRow`s into an Arrow `VectorSchemaRoot`.
+ * 2. **NativeWriter**: The JNI bridge to the Rust Publisher.
+ * 3. **FFI Export**: Synchronously exporting Arrow batches to the C Data Interface for Rust to consume.
+ */
 class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, options: Map[String, String]) 
   extends DataWriter[InternalRow] with org.apache.spark.internal.Logging {
   
@@ -64,6 +84,9 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
     }
   }
 
+  /**
+   * Converts the current Arrow buffer into a C-compatible format and invokes the native publisher.
+   */
   private def flush(): Unit = {
     if (rowCount == 0) return
     
