@@ -1,5 +1,8 @@
 # Spark Pub/Sub Connector
 
+> [!CAUTION]
+> **Work in Progress**: This project is currently in active development (Phase 5.6). APIs and configurations are subject to change. Use with caution in production environments.
+
 A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Structured Streaming), powered by **Rust** and **Apache Arrow**.
 
 ## 🚀 Features
