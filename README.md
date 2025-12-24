@@ -104,3 +104,11 @@ sbt "testOnly com.google.cloud.spark.pubsub.NativeWriterIntegrationTest"
 ## ⚠️ Important Notes
 - **Memory Management**: This connector uses off-heap memory via Apache Arrow. Ensure your Spark Executors have sufficient memory overhead.
 - **Java 21 Support**: Fully supported with "Peek" semantics (no Double-Free crashes).
+
+## 📄 License
+This project is licensed under a permissive "As-Is" license.
+- **No Support**: This software is provided without any warranty or support.
+- **No Liability**: The authors are not liable for any damages arising from its use.
+- **Attribution**: Not required, but appreciated.
+
+See [LICENSE](LICENSE) for details.
