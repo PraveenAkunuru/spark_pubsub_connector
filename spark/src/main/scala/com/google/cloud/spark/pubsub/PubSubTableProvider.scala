@@ -16,9 +16,10 @@ class PubSubTableProvider extends TableProvider with DataSourceRegister with org
     logInfo("Inferring schema for Pub/Sub (raw mode)")
     // Default schema for raw mode: payload, message_id, publish_time
     new StructType()
-      .add("payload", BinaryType, nullable = false)
       .add("message_id", StringType, nullable = false)
       .add("publish_time", TimestampType, nullable = false)
+      .add("payload", BinaryType, nullable = false)
+      .add("ack_id", StringType, nullable = false)
   }
 
   override def getTable(schema: StructType, partitioning: Array[Transform], properties: util.Map[String, String]): Table = {

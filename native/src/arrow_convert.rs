@@ -4,11 +4,14 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use std::sync::Arc;
 
+use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
+
 /// Builder for creating Arrow RecordBatches from Pub/Sub messages.
 pub struct ArrowBatchBuilder {
     message_ids: StringBuilder,
     publish_times: TimestampMicrosecondBuilder,
     payloads: BinaryBuilder,
+    ack_ids: StringBuilder,
     // TODO: Add support for attributes (Map/List)
 }
 
@@ -18,10 +21,12 @@ impl ArrowBatchBuilder {
             message_ids: StringBuilder::new(),
             publish_times: TimestampMicrosecondBuilder::new(),
             payloads: BinaryBuilder::new(),
+            ack_ids: StringBuilder::new(),
         }
     }
     
-    pub fn append(&mut self, msg: &PubsubMessage) {
+    pub fn append(&mut self, recv_msg: &ReceivedMessage) {
+        let msg = recv_msg.message.as_ref().expect("ReceivedMessage must have a message");
         self.message_ids.append_value(&msg.message_id);
         
         let timestamp_micros = if let Some(ts) = &msg.publish_time {
@@ -32,6 +37,7 @@ impl ArrowBatchBuilder {
         self.publish_times.append_value(timestamp_micros);
         
         self.payloads.append_value(&msg.data);
+        self.ack_ids.append_value(&recv_msg.ack_id);
         
         // Attributes TODO
     }
@@ -40,15 +46,17 @@ impl ArrowBatchBuilder {
         let message_id_array = Arc::new(self.message_ids.finish()) as ArrayRef;
         let publish_time_array = Arc::new(self.publish_times.finish()) as ArrayRef;
         let payload_array = Arc::new(self.payloads.finish()) as ArrayRef;
+        let ack_id_array = Arc::new(self.ack_ids.finish()) as ArrayRef;
         
         let schema = Schema::new(vec![
             Field::new("message_id", DataType::Utf8, false),
-            Field::new("publish_time", DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())), false),
+            Field::new("publish_time", DataType::Timestamp(TimeUnit::Microsecond, None), false),
             Field::new("payload", DataType::Binary, false),
+            Field::new("ack_id", DataType::Utf8, false),
         ]);
         
         (
-            vec![message_id_array, publish_time_array, payload_array],
+            vec![message_id_array, publish_time_array, payload_array, ack_id_array],
             Arc::new(schema)
         )
     }

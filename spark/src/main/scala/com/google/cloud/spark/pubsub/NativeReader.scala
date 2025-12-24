@@ -6,6 +6,7 @@ class NativeReader {
 
   @native def init(projectId: String, subscriptionId: String): Long
   @native def getNextBatch(readerPtr: Long, arrowArrayAddr: Long, arrowSchemaAddr: Long): Int
+  @native def acknowledge(readerPtr: Long, ackIds: Array[String]): Int
   @native def close(readerPtr: Long): Unit
 }
 

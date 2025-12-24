@@ -52,7 +52,7 @@ lazy val spark33 = (project in file("spark33"))
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
     Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )
 
 lazy val spark35 = (project in file("spark35"))
@@ -79,7 +79,7 @@ lazy val spark35 = (project in file("spark35"))
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
     Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )
 
 lazy val spark40 = (project in file("spark40"))
@@ -108,5 +108,5 @@ lazy val spark40 = (project in file("spark40"))
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
     Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )

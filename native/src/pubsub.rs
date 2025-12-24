@@ -9,48 +9,26 @@ use tokio::sync::mpsc::{self, Receiver};
 use tokio::time::Duration;
 use std::str::FromStr;
 
+use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
+
+use google_cloud_googleapis::pubsub::v1::StreamingPullRequest;
+use tokio::sync::mpsc::Sender;
+
 /// Client for interacting with Google Cloud Pub/Sub via gRPC.
 /// 
 /// This client uses `StreamingPull` to efficiently buffer messages in the background.
 pub struct PubSubClient {
     /// Receiver for buffered messages from the background task.
-    receiver: Receiver<PubsubMessage>,
+    receiver: Receiver<ReceivedMessage>,
+    /// Sender for requests (Acks) to the background task.
+    sender: Sender<StreamingPullRequest>,
 }
 
-/// Shared connection logic for Pub/Sub gRPC clients.
-async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
-    // 2. Connect
-    // Check for emulator
-    let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
-    
-    if let Some(host) = emulator_host {
-        let endpoint = format!("http://{}", host);
-        let channel = Channel::from_shared(endpoint)?
-            .connect()
-            .await?;
-        // No auth for emulator
-        Ok((channel, None))
-    } else {
-        // 1. Auth (ADC)
-        let auth_config = Config::default();
-        let ts_provider = DefaultTokenSourceProvider::new(auth_config).await
-            .map_err(|e| format!("Failed to create token source provider: {}", e))?;
-        let ts = ts_provider.token_source();
-        
-        let channel = Channel::from_static("https://pubsub.googleapis.com")
-            .connect()
-            .await?;
-            
-        let token_val = ts.token().await
-            .map_err(|e| format!("Failed to get access token: {}", e))?;
-        let bearer_token = format!("Bearer {}", token_val);
-        let header_val = MetadataValue::from_str(&bearer_token)?;
-        Ok((channel, Some(header_val)))
-    }
-}
+// ... (skip create_channel_and_header)
 
 impl PubSubClient {
     pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        eprintln!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
         let (channel, header_val) = create_channel_and_header().await?;
 
         let mut client = SubscriberClient::with_interceptor(channel, move |mut req: Request<()>| {
@@ -70,12 +48,16 @@ impl PubSubClient {
         };
 
         // Spawn background task for StreamingPull
+        eprintln!("Rust: Spawning background task for StreamingPull");
+        let (req_tx, req_stream) = tokio::sync::mpsc::channel(100);
+        let req_tx_clone = req_tx.clone();
+        
         tokio::spawn(async move {
-            let (req_tx, req_stream) = tokio::sync::mpsc::channel(100);
+            eprintln!("Rust: Background task started");
             let request_stream = tokio_stream::wrappers::ReceiverStream::new(req_stream);
             
             // Send initial request
-            let init_req = google_cloud_googleapis::pubsub::v1::StreamingPullRequest {
+            let init_req = StreamingPullRequest {
                 subscription: full_sub_name.clone(),
                 stream_ack_deadline_seconds: 10,
                 ack_ids: vec![],
@@ -86,26 +68,38 @@ impl PubSubClient {
                 max_outstanding_bytes: 10 * 1024 * 1024,
             };
             
-            if (req_tx.send(init_req).await).is_err() {
-                return; // broken
-            }
+            // Use the clone inside the task? No, we created the channel here.
+            // Wait, we need to return `req_tx` to PubSubClient.
+            // So we can clone `req_tx` for the task if needed, or just let `client` take ownership of the original sender.
+            // But `StreamingPull` takes `request_stream` (Receiver).
+            // We need `Sender` in `PubSubClient`.
             
-            // We keep `req_tx` alive if we need to send Acks later.
+            // Let's send init request FIRST via sender?
+            // If we use `ReceiverStream`, the sender controls the stream.
+            // So `req_tx` IS the control handle.
+            
+            // We just need to ensure init_req is sent.
+            if (req_tx_clone.send(init_req).await).is_err() {
+                 eprintln!("Rust: Failed to send init request");
+                 return; 
+            }
+            eprintln!("Rust: Init request sent. Waiting for response stream...");
             
             let response_stream = client.streaming_pull(Request::new(request_stream)).await;
             
             match response_stream {
                 Ok(response) => {
+                    eprintln!("Rust: StreamingPull response stream established");
                     let mut stream = response.into_inner();
                     while let Ok(Some(resp)) = stream.message().await {
                         for recv_msg in resp.received_messages {
-                             if let Some(inner_msg) = recv_msg.message {
-                                 if tx.send(inner_msg).await.is_err() {
-                                     return;
-                                 }
+                             if tx.send(recv_msg).await.is_err() {
+                                 eprintln!("Rust: Failed to send message to internal channel. Receiver dropped?");
+                                 return;
                              }
                         }
                     }
+                    eprintln!("Rust: StreamingPull stream ended");
                 },
                 Err(e) => {
                     eprintln!("Rust: StreamingPull failed: {:?}", e);
@@ -115,14 +109,14 @@ impl PubSubClient {
 
         Ok(Self {
             receiver: rx,
+            sender: req_tx, 
         })
     }
 
-    pub async fn fetch_batch(&mut self, batch_size: usize) -> Vec<PubsubMessage> {
-        eprintln!("Rust: fetch_batch called. Requesting max {} messages", batch_size);
+    pub async fn fetch_batch(&mut self, batch_size: usize) -> Vec<ReceivedMessage> {
+        // eprintln!("Rust: fetch_batch called. Requesting max {} messages", batch_size);
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size {
-             // Use timeout to allow partial batches
              match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
                  Ok(Some(msg)) => batch.push(msg),
                  Ok(None) => break, // closed
@@ -130,6 +124,19 @@ impl PubSubClient {
              }
         }
         batch
+    }
+    
+    pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if ack_ids.is_empty() {
+            return Ok(());
+        }
+        let req = StreamingPullRequest {
+            ack_ids,
+            ..Default::default()
+        };
+        // We use the sender to send this request into the stream
+        self.sender.send(req).await.map_err(|e| format!("Failed to send Ack request: {}", e))?;
+        Ok(())
     }
 }
 

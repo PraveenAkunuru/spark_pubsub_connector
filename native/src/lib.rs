@@ -141,6 +141,11 @@ mod jni {
             1
         }
 
+        pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids_arr: Box<[String]>) -> i32 {
+             if reader_ptr == 0 {
+                 return -1;
+             }
+             let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             if reader_ptr != 0 {
                 let _ = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
