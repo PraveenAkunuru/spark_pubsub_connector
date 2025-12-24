@@ -99,6 +99,26 @@ The connector exposes custom metrics in the Spark UI:
 | `credentialsFile` | Path to Service Account JSON (if not using ADC). | No | ADC |
 | `spark.pubsub.jitter.ms` | Random jitter delay (ms) during Reader initialization to prevent Thundering Herd. | No | 500 |
 
+## 🔍 Logging & Troubleshooting
+
+### Where to find logs?
+- **Rust Native Logs**: Critical native events (connection status, auth failures, retries, panics) are printed to the **Standard Error (stderr)** stream.
+    - **In Spark UI**: Go to the **Executors** tab -> Click `stderr` log for the specific executor.
+    - **In Kubernetes/Docker**: View container logs (e.g., `kubectl logs <pod> stderr`).
+    - **Key Pattern**: Look for lines starting with `Rust:`.
+
+- **Spark Connector Logs**: High-level lifecycle events (Writer creation, commit, abort) use Spark's standard `log4j`.
+    - **Location**: `stdout` / `log4j` files in Spark UI.
+    - **Logger Name**: `com.google.cloud.spark.pubsub.PubSubDataWriter`
+
+### Common Log Messages
+| Log Source | Message Pattern | Meaning | Action |
+|------------|-----------------|---------|--------|
+| **Rust** | `Rust: Async Publish failed: ... Retrying in Xms` | Transient error (e.g. 503) caught by resilience layer. | Normal behavior during high load. No action needed unless it persists > 60s. |
+| **Rust** | `Service was not ready: transport error` | Connection to Pub/Sub lost or Emulator unavailable. | Check network connectivity or Emulator status. |
+| **Rust** | `Rust deadline expired` | A message took too long to process. | Increase `spark.pubsub.ackDeadline` or verify downstream processing speed. |
+| **Spark** | `NativeWriter init failed` | JNI could not initialize the Rust client. | Check `projectId`, `topicId` and credentials. Check `stderr` for specific Rust error. |
+
 ## 🛡️ Resilience & Reliability
 - **Exponential Backoff**: Built-in retry logic for transient Pub/Sub errors (e.g., `ServiceUnavailable`) prevents job failure during outages.
 - **Smart Batching**: `PubSubDataWriter` buffers rows in Spark before flushing to Rust, triggered by `batchSize` or `lingerMs`.

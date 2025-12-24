@@ -146,7 +146,7 @@ impl PubSubClient {
         while batch.len() < batch_size {
              match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
                  Ok(Some(msg)) => {
-                     eprintln!("Rust: Received message from channel: {}", msg.ack_id);
+                     // eprintln!("Rust: Received message from channel: {}", msg.ack_id);
                      batch.push(msg);
                  },
                  Ok(None) => {
