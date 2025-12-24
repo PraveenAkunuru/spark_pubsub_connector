@@ -15,6 +15,12 @@ echo "==================================================="
 echo "Starting Dynamic Scaling Simulation (2 -> 10 -> 2)"
 echo "==================================================="
 
+clean_up() {
+    echo "Terminating dynamic scaling measurement..."
+    pkill -P $$ 2>/dev/null || true
+}
+trap clean_up EXIT INT TERM
+
 RUN_TEST() {
   local MASTER=$1
   local DESC=$2

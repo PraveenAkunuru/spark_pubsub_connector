@@ -105,6 +105,7 @@ The connector exposes custom metrics in the Spark UI:
 | `topicId` | Pub/Sub Topic ID (for Write). | Yes (Write) | - |
 | `batchSize` | Number of rows to buffer before native write. | No | 1000 |
 | `credentialsFile` | Path to Service Account JSON (if not using ADC). | No | ADC |
+| `spark.pubsub.jitter.ms` | Random jitter delay (ms) during Reader initialization to prevent Thundering Herd. | No | 500 |
 
 ## 🧪 Running Tests
 The project includes a comprehensive integration test suite using the Pub/Sub Emulator.
@@ -114,9 +115,15 @@ The project includes a comprehensive integration test suite using the Pub/Sub Em
 export PUBSUB_EMULATOR_HOST=localhost:8085
 gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
 
-# 2. Run Integration Tests
+# 2. Run Standard Integration Tests
 cd spark
 java -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.AckIntegrationTest"
+
+# 3. Run Extended Throughput Tests
+./run_custom_throughput.sh <payload_bytes> <msg_count>
+
+# 4. Run Dynamic Scaling Test (2 -> 10 -> 2 Executors)
+./run_dynamic_scaling_test.sh
 ```
 
 ## 📊 Benchmark

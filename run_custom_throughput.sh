@@ -11,11 +11,22 @@ MSG_COUNT=${2:-10000}
 echo "Starting Custom Throughput Verification (Size: ${PAYLOAD_SIZE_BYTES}B, Count: ${MSG_COUNT})..."
 
 cleanup() {
+  echo "Cleaning up..."
+  # Kill the Java test process if it's still running
+  if [ -n "$TEST_PID" ]; then
+    echo "Killing Java test process $TEST_PID..."
+    kill -TERM "$TEST_PID" 2>/dev/null || true
+    wait "$TEST_PID" 2>/dev/null || true
+  fi
+  
+  # Kill any remaining child processes of this script
+  pkill -P $$ 2>/dev/null || true
+
   echo "Cleaning up emulator..."
-  docker stop custom_emulator || true
-  docker rm custom_emulator || true
+  docker stop custom_emulator >/dev/null 2>&1 || true
+  docker rm custom_emulator >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 # Ensure no conflict
 cleanup
@@ -77,6 +88,7 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/ja
 # I will stick to `throughput-test-project` names to avoid changing Scala code if not needed.
 # RE-WRITING VARIABLES ABOVE TO MATCH run_throughput_test.sh EXPECTATIONS.
 
+# Run in background to allow trap to kill it
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
     -Dpubsub.project.id=${PROJECT_ID} \
@@ -84,4 +96,6 @@ $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dspark.master=${TEST_MASTER:-local[4]} \
     -Dpubsub.msg.count=${MSG_COUNT} \
     -Dpubsub.payload.size=${PAYLOAD_SIZE_BYTES} \
-    -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest"
+    -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest" &
+TEST_PID=$!
+wait $TEST_PID
