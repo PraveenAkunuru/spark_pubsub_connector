@@ -1,0 +1,35 @@
+# Scala / sbt
+target/
+project/target/
+project/project/
+.bsp/
+.scala-build/
+*.class
+*.log
+
+# Rust
+native/target/
+**/*.rs.bk
+
+# IntelliJ / IDE
+.idea/
+*.iml
+.vscode/
+
+# Spark / Metastore
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Compiled Binaries and Objects
+*.jar
+*.so
+*.dylib
+*.dll
+*.o
+*.a
+
+# Temporary files
+repro/
+test_output/
+checkpoint/

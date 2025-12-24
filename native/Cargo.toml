@@ -1,0 +1,29 @@
+[package]
+name = "native_pubsub_connector"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+arrow = { version = "53.0.0", features = ["ffi"] }
+tokio = { version = "1.0", features = ["full"] }
+tonic = { version = "0.12", features = ["tls", "tls-roots", "gzip"] }
+prost = "0.13"
+prost-types = "0.13"
+jni = "0.19"
+robusta_jni = "0.2"
+futures = "0.3"
+google-cloud-googleapis = { version = "0.15", features = ["pubsub"] }
+google-cloud-auth = "0.16"
+google-cloud-token = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+once_cell = "1.19"
+log = "0.4"
+env_logger = "0.11"
+tokio-stream = "0.1"
+# Pin home crate to avoid edition 2024 issue
+home = "=0.5.9"
+openssl = { version = "0.10", features = ["vendored"] }
