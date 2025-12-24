@@ -49,8 +49,15 @@ echo "Publishing ${MSG_COUNT} messages..."
 # Create payload
 DATA=$(printf 'a%.0s' $(seq 1 ${PAYLOAD_SIZE_BYTES}) | base64 -w 0)
 
-# Batch size 100
-BATCH_SIZE=100
+# Dynamic Batch Size to respect Pub/Sub 10MB limit
+# Target ~5MB per batch to be safe
+if [ "$PAYLOAD_SIZE_BYTES" -gt 50000 ]; then
+  BATCH_SIZE=$((5000000 / PAYLOAD_SIZE_BYTES))
+  if [ "$BATCH_SIZE" -lt 1 ]; then BATCH_SIZE=1; fi
+else
+  BATCH_SIZE=100
+fi
+echo "Using Batch Size: $BATCH_SIZE"
 NUM_BATCHES=$((MSG_COUNT / BATCH_SIZE))
 
 for b in $(seq 1 ${NUM_BATCHES}); do
@@ -88,14 +95,17 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/ja
 # I will stick to `throughput-test-project` names to avoid changing Scala code if not needed.
 # RE-WRITING VARIABLES ABOVE TO MATCH run_throughput_test.sh EXPECTATIONS.
 
+# Export variables for Scala test (sys.env)
+export PUBSUB_PROJECT_ID="${PROJECT_ID}"
+export PUBSUB_SUBSCRIPTION_ID="${SUB_ID}"
+export PUBSUB_MSG_COUNT="${MSG_COUNT}"
+export PUBSUB_PAYLOAD_SIZE="${PAYLOAD_SIZE_BYTES}"
+export TEST_MASTER="${TEST_MASTER:-local[4]}"
+
 # Run in background to allow trap to kill it
+# Note: sbt might need javaOptions to pass -D, but Env vars work reliably.
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -Dpubsub.project.id=${PROJECT_ID} \
-    -Dpubsub.subscription.id=${SUB_ID} \
-    -Dspark.master=${TEST_MASTER:-local[4]} \
-    -Dpubsub.msg.count=${MSG_COUNT} \
-    -Dpubsub.payload.size=${PAYLOAD_SIZE_BYTES} \
     -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest" &
 TEST_PID=$!
 wait $TEST_PID
