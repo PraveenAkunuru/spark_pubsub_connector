@@ -321,6 +321,9 @@ impl PublisherClient {
                             messages,
                         };
                         
+                        // Exponential Backoff for resilience against transient errors.
+                        // Starts at 100ms, caps at 60s.
+                        // Essential for handling "ServiceUnavailable" or "TransportError" during high load or outages.
                         let mut backoff_millis = 100;
                         let max_backoff = 60000; // 60s
 

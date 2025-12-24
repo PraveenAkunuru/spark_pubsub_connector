@@ -96,6 +96,14 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
 
   /**
    * Converts the current Arrow buffer into a C-compatible format and invokes the native publisher.
+   *
+   * This method:
+   * 1. Sets the row count on the VectorSchemaRoot.
+   * 2. Exports the root to C Data Interface structs (ArrowArray, ArrowSchema).
+   * 3. Calls `NativeWriter.writeBatch` via JNI.
+   * 4. Resets the buffer for next batch.
+   *
+   * @throws RuntimeException if the native write fails.
    */
   private def flush(): Unit = {
     if (rowCount == 0) return

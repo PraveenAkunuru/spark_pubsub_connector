@@ -4,6 +4,15 @@ import org.apache.spark.sql.SparkSession
 import org.scalatest.funsuite.AnyFunSuite
 import org.apache.spark.sql.functions._
 
+/**
+ * Integration test for verifying the scalability of the Pub/Sub writer.
+ *
+ * This test uses a dynamic number of executors (controlled via `TEST_MASTER` env var)
+ * to verify that the `PubSubDataWriter` can handle concurrent writes without locking or memory issues.
+ *
+ * Usage:
+ *   TEST_MASTER="local[10]" ./run_custom_write_load.sh
+ */
 class WriteScaleIntegrationTest extends AnyFunSuite {
 
   test("Write Scalability - Dynamic Executor Count") {
