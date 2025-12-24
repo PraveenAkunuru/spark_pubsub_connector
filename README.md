@@ -106,8 +106,8 @@ sbt "testOnly com.google.cloud.spark.pubsub.NativeWriterIntegrationTest"
 - **Java 21 Support**: Fully supported with "Peek" semantics (no Double-Free crashes).
 
 ## 📄 License
-This project is licensed under a permissive "As-Is" license.
-- **No Support**: This software is provided without any warranty or support.
+This project is licensed under the **MIT-0 (MIT No Attribution)** license.
+- **No Support**: This software is provided "as-is" without any warranty.
 - **No Liability**: The authors are not liable for any damages arising from its use.
 - **Attribution**: Not required, but appreciated.
 
