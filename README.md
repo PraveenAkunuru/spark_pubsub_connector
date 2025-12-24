@@ -120,8 +120,9 @@ java -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.AckInte
 
 ## 📊 Benchmark
 Tested on a standard local machine (4-core), the connector achieves:
-- **Throughput**: ~40-60 MB/s for 1KB payloads.
+- **Throughput**: ~40-60 MB/s for 1KB payloads (4 cores).
 - **Latency**: Sub-5ms JNI overhead per batch.
+
 
 ## ⚠️ Important Notes
 - **Memory Management**: This connector uses off-heap memory via Apache Arrow. Ensure your Spark Executors have sufficient memory overhead.
