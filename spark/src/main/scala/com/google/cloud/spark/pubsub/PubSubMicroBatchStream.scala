@@ -31,7 +31,11 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String])
     logDebug(s"planInputPartitions called with start=$start, end=$end")
     val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, "")
     val subscriptionId = options.getOrElse(PubSubConfig.SUBSCRIPTION_ID_KEY, "")
-    Array(PubSubInputPartition(0, projectId, subscriptionId))
+    val numPartitions = options.getOrElse(PubSubConfig.NUM_PARTITIONS_KEY, PubSubConfig.NUM_PARTITIONS_DEFAULT).toInt
+    
+    (0 until numPartitions).map { i =>
+      PubSubInputPartition(i, projectId, subscriptionId)
+    }.toArray
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {

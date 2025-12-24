@@ -30,15 +30,35 @@ lazy val commonSettings = Seq(
   version := "0.1.0",
   fork in Test := true,
   envVars in Test := Map(
-    "LD_PRELOAD" -> "/lib/x86_64-linux-gnu/libgcc_s.so.1",
     "PUBSUB_EMULATOR_HOST" -> sys.env.getOrElse("PUBSUB_EMULATOR_HOST", "localhost:8085")
   )
 )
 
-lazy val spark3 = (project in file("."))
+lazy val spark33 = (project in file("spark33"))
   .settings(commonSettings)
   .settings(
-    name := "spark-pubsub-connector",
+    name := "spark-pubsub-connector-3.3",
+    scalaVersion := "2.12.18",
+    libraryDependencies ++= Seq(
+      "org.apache.spark" %% "spark-core" % "3.3.4",
+      "org.apache.spark" %% "spark-sql" % "3.3.4",
+      "org.apache.spark" %% "spark-catalyst" % "3.3.4",
+      "org.apache.arrow" % "arrow-vector" % "15.0.2",
+      "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
+      "org.apache.arrow" % "arrow-c-data" % "15.0.2",
+      "org.scalatest" %% "scalatest" % "3.2.16" % Test
+    ),
+    Compile / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "scala",
+    Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
+    Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
+    Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
+  )
+
+lazy val spark35 = (project in file("spark35"))
+  .settings(commonSettings)
+  .settings(
+    name := "spark-pubsub-connector-3.5",
     scalaVersion := "2.12.18",
     libraryDependencies ++= Seq(
       "org.apache.spark" %% "spark-core" % "3.5.0",
@@ -47,23 +67,22 @@ lazy val spark3 = (project in file("."))
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",
-      "org.apache.arrow" % "arrow-format" % "15.0.2",
       "org.scalatest" %% "scalatest" % "3.2.16" % Test
     ),
+    // Force Arrow to use Spark's Jackson versions to prevent binary incompatibility
     dependencyOverrides ++= Seq(
-      "org.apache.arrow" % "arrow-vector" % "15.0.2",
-      "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
-      "org.apache.arrow" % "arrow-memory-core" % "15.0.2",
-      "org.apache.arrow" % "arrow-c-data" % "15.0.2",
-      "com.fasterxml.jackson.core" % "jackson-databind" % "2.16.0",
-      "com.fasterxml.jackson.core" % "jackson-core" % "2.16.0",
-      "com.fasterxml.jackson.core" % "jackson-annotations" % "2.16.0",
-      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.16.0"
+      "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
+      "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2",
+      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2"
     ),
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParent}/native/target/debug"
+    Compile / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "scala",
+    Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
+    Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
+    Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
   )
 
-lazy val spark4 = (project in file("spark4-build"))
+lazy val spark40 = (project in file("spark40"))
   .settings(commonSettings)
   .settings(
     name := "spark-pubsub-connector-4.0",
@@ -75,12 +94,19 @@ lazy val spark4 = (project in file("spark4-build"))
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",
-      "org.apache.arrow" % "arrow-format" % "15.0.2",
       "org.scalatest" %% "scalatest" % "3.2.16" % Test
+    ),
+    // Explicitly pin Jackson/Netty to Spark 4.0 versions
+    dependencyOverrides ++= Seq(
+      "com.fasterxml.jackson.core" % "jackson-databind" % "2.17.2",
+      "com.fasterxml.jackson.core" % "jackson-core" % "2.17.2",
+      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.17.2",
+      "io.netty" % "netty-all" % "4.1.110.Final",
+      "io.netty" % "netty-transport-native-epoll" % "4.1.110.Final"
     ),
     Compile / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "scala",
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
     Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParent}/native/target/debug"
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/debug"
   )

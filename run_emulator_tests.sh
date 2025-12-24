@@ -76,4 +76,4 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
 cd spark
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -jar sbt-launch.jar clean update test
+    -jar sbt-launch.jar spark35/clean spark35/update spark35/test

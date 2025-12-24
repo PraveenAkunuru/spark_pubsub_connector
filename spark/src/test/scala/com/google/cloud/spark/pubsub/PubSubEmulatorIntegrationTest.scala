@@ -32,6 +32,7 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
         .format("com.google.cloud.spark.pubsub.PubSubTableProvider")
         .option("projectId", projectId)
         .option("subscriptionId", subscriptionId)
+        .option("numPartitions", "3")
         .load()
 
       val query = df.writeStream
@@ -45,11 +46,11 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
       // We loop and check count.
       
       var foundData = false
-      for (_ <- 1 to 20) {
+      for (attempt <- 1 to 20) {
         if (!foundData) {
             Thread.sleep(1000)
             val count = spark.sql("SELECT * FROM pubsub_data").count()
-            println(s"Current count: $count")
+            println(s"Current count at attempt $attempt: $count")
             if (count > 0) {
                 foundData = true
             }

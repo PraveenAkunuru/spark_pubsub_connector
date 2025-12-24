@@ -123,7 +123,7 @@ impl PubSubClient {
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size {
              // Use timeout to allow partial batches
-             match tokio::time::timeout(Duration::from_millis(50), self.receiver.recv()).await {
+             match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
                  Ok(Some(msg)) => batch.push(msg),
                  Ok(None) => break, // closed
                  Err(_) => break, // timeout
