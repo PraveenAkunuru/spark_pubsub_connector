@@ -13,14 +13,6 @@ A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Stru
 > [!CAUTION]
 > **Work in Progress**: This project is currently in active development (Phase 5.6). APIs and configurations are subject to change. Use with caution in production environments.
 
-A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Structured Streaming), powered by **Rust** and **Apache Arrow**.
-
-## 🚀 Features
-- **High Throughput**: Bypasses the JVM Pub/Sub client for a native Rust implementation using gRPC (`tonic`).
-- **Zero-Copy**: Uses the Arrow C Data Interface (FFI) to transfer data between Rust and Spark without expensive serialization.
-- **Structured Streaming**: Full support for Spark's `readStream` and `writeStream` APIs.
-- **Type Safety**: Centralized mapping ensuring consistency between Spark SQL types and Pub/Sub messages.
-
 ## 📋 Prerequisites
 - **Java**: JDK 17 or 21 (Tested on OpenJDK 21).
 - **Rust**: Stable toolchain (1.75+).
