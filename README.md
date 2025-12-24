@@ -99,6 +99,11 @@ The connector exposes custom metrics in the Spark UI:
 | `credentialsFile` | Path to Service Account JSON (if not using ADC). | No | ADC |
 | `spark.pubsub.jitter.ms` | Random jitter delay (ms) during Reader initialization to prevent Thundering Herd. | No | 500 |
 
+## 🛡️ Resilience & Reliability
+- **Exponential Backoff**: Built-in retry logic for transient Pub/Sub errors (e.g., `ServiceUnavailable`) prevents job failure during outages.
+- **Smart Batching**: `PubSubDataWriter` buffers rows in Spark before flushing to Rust, triggered by `batchSize` or `lingerMs`.
+- **Memory Safety**: Rigorous JNI memory management ensures no leaks, even with high-throughput native allocations.
+
 ## 🧪 Running Tests
 The project includes a comprehensive integration test suite using the Pub/Sub Emulator.
 
@@ -107,14 +112,21 @@ The project includes a comprehensive integration test suite using the Pub/Sub Em
 export PUBSUB_EMULATOR_HOST=localhost:8085
 gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
 
-# 2. Run Standard Integration Tests
+# 2. Run Standard Integration Tests (Read/Ack)
 cd spark
-java -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.AckIntegrationTest"
+"$JAVA_HOME/bin/java" -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.AckIntegrationTest"
 
-# 3. Run Extended Throughput Tests
+# 3. Verify Write Path (Sink)
+./run_write_verification.sh
+
+# 4. Measure Write Scalability & Resilience
+./run_write_scaling_test.sh
+# Runs a 2 -> 10 -> 2 executor scaling scenario with fault injection tolerance.
+
+# 5. Run Extended Throughput Tests (Read)
 ./run_custom_throughput.sh <payload_bytes> <msg_count>
 
-# 4. Run Dynamic Scaling Test (2 -> 10 -> 2 Executors)
+# 6. Run Dynamic Scaling Test (Read)
 ./run_dynamic_scaling_test.sh
 ```
 
