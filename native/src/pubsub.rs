@@ -321,13 +321,23 @@ impl PublisherClient {
                             messages,
                         };
                         
-                        let mut request = Request::new(req);
-                        if let Some(val) = &header_val_clone { // Use the cloned header_val
-                            request.metadata_mut().insert("authorization", val.clone());
-                        }
-                        
-                        if let Err(e) = client.publish(request).await {
-                            eprintln!("Rust: Async Publish failed: {:?}", e);
+                        let mut backoff_millis = 100;
+                        let max_backoff = 60000; // 60s
+
+                        loop {
+                            let mut request = Request::new(req.clone());
+                            if let Some(val) = &header_val_clone {
+                                request.metadata_mut().insert("authorization", val.clone());
+                            }
+                            
+                            match client.publish(request).await {
+                                Ok(_) => break, // Success
+                                Err(e) => {
+                                    eprintln!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_millis)).await;
+                                    backoff_millis = std::cmp::min(backoff_millis * 2, max_backoff);
+                                }
+                            }
                         }
                     },
                     WriterCommand::Flush(ack_tx) => {
