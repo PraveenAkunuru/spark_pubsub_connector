@@ -14,4 +14,6 @@ object PubSubConfig {
   val LINGER_MS_KEY = "lingerMs"
   val DEFAULT_LINGER_MS = 1000
   val MAX_BATCH_BYTES_KEY = "maxBatchBytes"
+  val JITTER_MS_KEY = "jitterMs"
+  val DEFAULT_JITTER_MS = "500"
 }

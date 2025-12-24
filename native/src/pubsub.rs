@@ -194,55 +194,55 @@ pub(crate) static ACK_RESERVOIR: Lazy<Mutex<AckReservoirMap>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
 
-/// Starts the background deadline manager if not already running.
+/// Starts the background deadline manager.
+/// This function should be called once per Runtime to ensure liveness.
+/// Starts the background deadline manager.
+/// This function should be called once per Runtime to ensure liveness.
 pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
-    static STARTED: Lazy<std::sync::atomic::AtomicBool> = Lazy::new(|| std::sync::atomic::AtomicBool::new(false));
-    if STARTED.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_ok() {
-        eprintln!("Rust: Starting background deadline manager");
-        rt.spawn(async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                
-                let snapshot: Vec<(String, Vec<String>)> = {
-                    let reservoir = ACK_RESERVOIR.lock().unwrap();
-                    let mut all = Vec::new();
-                    // We iterate over batches, and then subscriptions
-                    for (_batch_id, subs) in reservoir.iter() {
-                        for (sub, ids) in subs {
-                            if !ids.is_empty() {
-                                all.push((sub.clone(), ids.clone()));
-                            }
+    eprintln!("Rust: Starting background deadline manager for runtime");
+    rt.spawn(async {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            
+            let snapshot: Vec<(String, Vec<String>)> = {
+                let reservoir = ACK_RESERVOIR.lock().unwrap();
+                let mut all = Vec::new();
+                for (_batch_id, subs) in reservoir.iter() {
+                    for (sub, ids) in subs {
+                        if !ids.is_empty() {
+                            all.push((sub.clone(), ids.clone()));
                         }
-                    }
-                    all
-                };
-
-                for (sub, ids) in snapshot {
-                    let (channel, header_val) = match create_channel_and_header().await {
-                        Ok(res) => res,
-                        Err(e) => {
-                            eprintln!("Rust DeadlineMgr: Failed to get channel: {:?}", e);
-                            continue;
-                        }
-                    };
-                    let mut client = google_cloud_googleapis::pubsub::v1::subscriber_client::SubscriberClient::new(channel);
-                    
-                    let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
-                        subscription: sub,
-                        ack_ids: ids,
-                        ack_deadline_seconds: 30, // Extend by 30s
-                    };
-                    let mut request = Request::new(req);
-                    if let Some(val) = header_val {
-                        request.metadata_mut().insert("authorization", val);
-                    }
-                    if let Err(e) = client.modify_ack_deadline(request).await {
-                        eprintln!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
                     }
                 }
+                all
+            };
+
+            for (sub, ids) in snapshot {
+                let (channel, header_val) = match create_channel_and_header().await {
+                    Ok(res) => res,
+                    Err(e) => {
+                        eprintln!("Rust DeadlineMgr: Failed to get channel: {:?}", e);
+                        continue;
+                    }
+                };
+                
+                let mut client = SubscriberClient::new(channel);
+                let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
+                    subscription: sub,
+                    ack_ids: ids,
+                    ack_deadline_seconds: 30, // Extend by 30s
+                };
+                let mut request = Request::new(req);
+                if let Some(val) = header_val {
+                    request.metadata_mut().insert("authorization", val);
+                }
+                
+                if let Err(e) = client.modify_ack_deadline(request).await {
+                    eprintln!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
+                }
             }
-        });
-    }
+        }
+    });
 }
 
 /// Helper to create a gRPC channel and optional Auth header.
@@ -283,10 +283,16 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     Ok((channel, header_val))
 }
 
+/// Command sent to the background publisher task.
+enum WriterCommand {
+    Publish(Vec<PubsubMessage>),
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
 /// High-performance publisher client that sends batches of messages via gRPC.
 /// It uses a background task to decouple Spark execution from network latency.
 pub struct PublisherClient {
-    tx: Sender<Vec<PubsubMessage>>,
+    tx: Sender<WriterCommand>,
 }
 
 impl PublisherClient {
@@ -300,26 +306,36 @@ impl PublisherClient {
             format!("projects/{}/topics/{}", project_id, topic_id)
         };
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<PubsubMessage>>(100);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<WriterCommand>(100);
         let topic = full_topic_name.clone();
         let header_val_clone = header_val.clone(); // Clone header_val for the spawned task
 
         tokio::spawn(async move {
-            while let Some(messages) = rx.recv().await {
-                if messages.is_empty() { continue; }
-                
-                let req = google_cloud_googleapis::pubsub::v1::PublishRequest {
-                    topic: topic.clone(),
-                    messages,
-                };
-                
-                let mut request = Request::new(req);
-                if let Some(val) = &header_val_clone { // Use the cloned header_val
-                    request.metadata_mut().insert("authorization", val.clone());
-                }
-                
-                if let Err(e) = client.publish(request).await {
-                    eprintln!("Rust: Async Publish failed: {:?}", e);
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    WriterCommand::Publish(messages) => {
+                         if messages.is_empty() { continue; }
+                        
+                        let req = google_cloud_googleapis::pubsub::v1::PublishRequest {
+                            topic: topic.clone(),
+                            messages,
+                        };
+                        
+                        let mut request = Request::new(req);
+                        if let Some(val) = &header_val_clone { // Use the cloned header_val
+                            request.metadata_mut().insert("authorization", val.clone());
+                        }
+                        
+                        if let Err(e) = client.publish(request).await {
+                            eprintln!("Rust: Async Publish failed: {:?}", e);
+                        }
+                    },
+                    WriterCommand::Flush(ack_tx) => {
+                        // Because we process commands sequentially in this loop,
+                        // by the time we reach here, all previous Publish commands are finished.
+                        let _ = ack_tx.send(());
+                        eprintln!("Rust: Flush completed.");
+                    }
                 }
             }
             eprintln!("Rust: Publisher background task ended");
@@ -333,13 +349,19 @@ impl PublisherClient {
         if messages.is_empty() {
              return Ok(());
         }
-        self.tx.send(messages).await.map_err(|e| format!("Failed to queue batch for publish: {}", e))?;
+        self.tx.send(WriterCommand::Publish(messages)).await.map_err(|e| format!("Failed to queue batch for publish: {}", e))?;
         Ok(())
     }
     
+    /// Flushes all pending messages by sending a Flush command and waiting for it to be processed.
     pub async fn flush(&self) {
-        // Since we use MPSC channel, messages are queued. 
-        // For a full flush, we'd need to wait for the channel to be empty or use a shutdown signal.
-        // For now, Spark's task completion will wait for JNI calls to finish.
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {
+            eprintln!("Rust: Failed to send flush command: {:?}", e);
+            return;
+        }
+        if let Err(e) = ack_rx.await {
+            eprintln!("Rust: Flush wait failed (channel closed): {:?}", e);
+        }
     }
 }

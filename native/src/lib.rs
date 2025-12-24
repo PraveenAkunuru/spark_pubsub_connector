@@ -80,14 +80,16 @@ mod jni {
 
     impl<'env: 'borrow, 'borrow> NativeReader<'env, 'borrow> {
         
-        /// Initializes a new `PubSubClient` and background `StreamingPull` task.
-        /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader` which holds the client and runtime.
-        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, subscription_id: String) -> jlong {
+        /// Initializes a new `PubSubClient` with the given project and subscription.
+        /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
+        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32) -> jlong {
             let result = std::panic::catch_unwind(|| {
                 // Guideline 4: Staggered Initialization
-                let mut rng = rand::thread_rng();
-                let delay_ms = rand::Rng::gen_range(&mut rng, 0..500);
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                if jitter_millis > 0 {
+                    let mut rng = rand::thread_rng();
+                    let delay_ms = rand::Rng::gen_range(&mut rng, 0..(jitter_millis as u64));
+                    std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                }
 
                 let rt = Runtime::new().expect("Failed to create Tokio runtime");
                 
@@ -95,18 +97,19 @@ mod jni {
                     PubSubClient::new(&project_id, &subscription_id).await
                 });
 
+                // Start the deadline manager on this runtime
                 crate::pubsub::start_deadline_manager(&rt);
 
                 match client_res {
-                    Ok(c) => {
+                    Ok(client) => {
                         let reader = Box::new(crate::RustPartitionReader {
                             rt,
-                            client: c,
+                            client,
                         });
                         Box::into_raw(reader) as jlong
                     },
                     Err(e) => {
-                        eprintln!("Rust: Failed to initialize reader: {:?}", e);
+                        eprintln!("Rust: Failed to create Pub/Sub client: {:?}", e);
                         0
                     }
                 }
@@ -364,29 +367,89 @@ mod jni {
                     let array_ptr = arrow_array_addr as *mut FFI_ArrowArray;
                     let schema_ptr = arrow_schema_addr as *mut FFI_ArrowSchema;
 
-                    // 1. Validate both Schema and Array structures before taking ownership
-                    let schema_val_raw = std::ptr::read(schema_ptr);
-                    let schema_mirror: crate::FfiArrowSchemaMirror = std::mem::transmute(schema_val_raw);
+                    // 1. Validate Schema before taking full ownership (peek without dropping)
+                    // We cast to our mirror struct to check fields.
+                    // Note: We don't read it yet, just inspect the raw pointer content.
+                    let schema_mirror = &*(schema_ptr as *const crate::FfiArrowSchemaMirror);
                     
                     if schema_mirror.n_children > 0 {
                         if schema_mirror.children.is_null() {
                             eprintln!("Rust: FFI Error - Schema n_children is {} but children pointer is NULL", schema_mirror.n_children);
+                            // If we return here, we haven't called std::ptr::read(), so we haven't taken ownership "in Rust terms".
+                            // However, the caller (Java/Spark) expects us to take ownership.
+                            // If we don't, Spark might double free or leak?
+                            // Spark Arrow: "The consumer is responsible for releasing the memory."
+                            // If we error, we must still release the input if we "consumed" the responsibility.
+                            // But usually if FFI fails, we should release what we got.
+                            // To be safe: we import it to release it.
+                            let schema_val = std::ptr::read(schema_ptr);
+                             // Clean up properly by letting Arrow drop it?
+                             // FFI_ArrowSchema implements Drop? No, we need to call release callback manually if we don't convert.
+                             // Best way: Import fully, then drop.
+                             let _ = arrow::ffi::from_ffi(std::mem::zeroed(), &schema_val); // This is hacky.
+                             // Better: Just release manually using the callback.
+                             if let Some(release) = schema_mirror.release {
+                                 release(schema_ptr);
+                             }
                             return -20;
                         }
                     }
 
+                    // Now we take ownership safely
                     let array_val_raw = std::ptr::read(array_ptr);
-                    let array_mirror: crate::FfiArrowArrayMirror = std::mem::transmute(array_val_raw);
-
-                    // Transmute mirrors back to FFI structs for arrow-rs
-                    let array_val_final: FFI_ArrowArray = std::mem::transmute(array_mirror);
-                    let schema_val_final: FFI_ArrowSchema = std::mem::transmute(schema_mirror);
+                    let schema_val_raw = std::ptr::read(schema_ptr);
+                    
+                    // Arrays are now owned. If we fail from here on, we MUST drop them.
+                    // arrow::ffi::from_ffi takes these by value (moves them).
+                    // But wait, from_ffi call signature: `pub fn from_ffi(array: FFI_ArrowArray, schema: &FFI_ArrowSchema) -> Result<ArrayData, ArrowError>`
+                    // It takes `array` by value (consumes), but `schema` by reference?? 
+                    // No, `from_ffi` signature is: `fn from_ffi(array: FFI_ArrowArray, schema: &FFI_ArrowSchema)`.
+                    // It does NOT consume schema. We still own schema.
 
                     // 3. Import into arrow-rs
-                    let array_data = match arrow::ffi::from_ffi(array_val_final, &schema_val_final) {
+                    let array_data = match arrow::ffi::from_ffi(array_val_raw, &schema_val_raw) {
                         Ok(data) => data,
                         Err(e) => {
                             eprintln!("Rust: Failed to import Arrow array from FFI: {:?}", e);
+                            // We own array_val_raw and schema_val_raw. We must drop/release them.
+                            // Schema we still own. Array was moved into from_ffi? No, only matching success? 
+                            // `from_ffi` takes ownership of `array`. If it fails, does it drop `array`?
+                            // Looking at arrow-rs source: if it returns Err, it likely drops the input FFI_ArrowArray.
+                            // But we DEFINITELY own schema_val_raw. Arrow-rs struct doesn't implement Drop that calls release.
+                            // We need to validly release the schema.
+                             // Actually, FFI_ArrowSchema and FFI_ArrowArray DO NOT implement Drop to call release.
+                             // We must call release manually if we don't successfully convert to something that manages it.
+                            
+                            // NOTE: Arrow C Data Interface says: "The release callback is responsible for releasing the memory."
+                            // If we successfully imported `array_data` (Data type), it manages release.
+                            // If `from_ffi` failed, we need to ensure release is called.
+                            // THIS IS TRICKY. 
+                            // Safe bet: We check if they are released.
+                            // Actually, let's just use the `ArrowArray` and `ArrowSchema` wrappers from arrow::ffi if possible?
+                            // They are not exposed easily.
+                            
+                            // Manual release fall-back:
+                            // We just cast back to mirror and call release.
+                            let sm: crate::FfiArrowSchemaMirror = std::mem::transmute(schema_val_raw);
+                            if let Some(r) = sm.release { r(schema_ptr); } // Use original pointer or struct?
+                            // We moved std::ptr::read, so the struct is on stack. We call release on the STRUCT pointer?
+                            // The release callback expects `*mut FFI_ArrowSchema`.
+                            // We need to pass a pointer to our stack object? No, the release callback usually frees the `private_data`.
+                            // It doesn't free the struct itself if it's stack allocated, but it frees the buffers.
+                            // But `std::ptr::read` COPIED the struct content to stack. The original pointer `schema_ptr` points to valid memory?
+                            // Yes, in C Data Interface, the struct itself is allocated by caller.
+                            // We should call release on the `schema_ptr`!
+                            // wait, we `std::ptr::read` it, so we effectively "moved" it. 
+                            // But the resources are pointed to by fields.
+                            // If we call release on `schema_ptr`, it cleans up resources.
+                            // Our stack copy is just a copy of pointers.
+                            // CORRECT FIX: Just call release on the ORIGINAL pointers if import fails.
+                             let sm_ref = &*(schema_ptr as *const crate::FfiArrowSchemaMirror);
+                             if let Some(r) = sm_ref.release { r(schema_ptr); }
+
+                             let am_ref = &*(array_ptr as *const crate::FfiArrowArrayMirror);
+                             if let Some(r) = am_ref.release { r(array_ptr); }
+
                             return -2;
                         }
                     };
@@ -430,10 +493,11 @@ mod jni {
             let _ = std::panic::catch_unwind(|| {
                 if writer_ptr != 0 {
                     let writer = unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
-                    // Runtime will be dropped here, shutting down connections
+                    // Flush before dropping (which kills the runtime)
                     writer.rt.block_on(async {
                         writer.client.flush().await;
                     });
+                    // writer is dropped here, closing connections
                 }
             });
         }

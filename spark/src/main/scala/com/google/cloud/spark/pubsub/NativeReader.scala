@@ -17,7 +17,7 @@ class NativeReader {
    * Initializes the native Pub/Sub client for a specific subscription.
    * Returns a raw pointer (Long) to the Rust state.
    */
-  @native def init(projectId: String, subscriptionId: String): Long
+  @native def init(projectId: String, subscriptionId: String, jitterMillis: Int): Long
 
   /**
    * Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.

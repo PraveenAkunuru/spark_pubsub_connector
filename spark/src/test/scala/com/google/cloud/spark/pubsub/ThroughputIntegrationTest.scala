@@ -4,15 +4,24 @@ import org.apache.spark.sql.SparkSession
 import org.scalatest.funsuite.AnyFunSuite
 
 class ThroughputIntegrationTest extends AnyFunSuite {
-  val projectId = "throughput-test-project"
-  val subscriptionId = "throughput-sub"
+  // These are now defined inside the test method to allow for sys.env overrides
+  // val projectId = sys.props.getOrElse("pubsub.project.id", "throughput-test-project")
+  // val subscriptionId = sys.props.getOrElse("pubsub.subscription.id", "throughput-sub")
+  // val targetCount = sys.props.getOrElse("pubsub.msg.count", "50000").toInt
 
-  test("Throughput measurement - 1KB messages") {
+  test("Throughput measurement - Configurable") {
     val spark = SparkSession.builder()
       .appName("ThroughputIntegrationTest")
-      .master("local[4]")
+      .master(sys.env.getOrElse("TEST_MASTER", sys.props.getOrElse("spark.master", "local[4]")))
       .config("spark.sql.vectorized.enabled", "true")
       .getOrCreate()
+
+    import spark.implicits._
+
+    val projectId = sys.env.getOrElse("PUBSUB_PROJECT_ID", sys.props.getOrElse("pubsub.project.id", "throughput-test-project"))
+    val subscriptionId = sys.env.getOrElse("PUBSUB_SUBSCRIPTION_ID", sys.props.getOrElse("pubsub.subscription.id", "throughput-sub"))
+    val targetCount = sys.env.getOrElse("PUBSUB_MSG_COUNT", sys.props.getOrElse("pubsub.msg.count", "50000")).toInt
+    val payloadSize = sys.env.getOrElse("PUBSUB_PAYLOAD_SIZE", sys.props.getOrElse("pubsub.payload.size", "1024")).toInt
 
     try {
       val df = spark.readStream
@@ -28,7 +37,7 @@ class ThroughputIntegrationTest extends AnyFunSuite {
           .start()
 
       // Target count
-      val target = 50000
+      val target = targetCount
       var count = 0L
       val startTime = System.currentTimeMillis()
       val timeout = 120000 // 120 seconds
@@ -44,7 +53,11 @@ class ThroughputIntegrationTest extends AnyFunSuite {
       val durationSec = durationMs / 1000.0
       
       val msgPerSec = count / durationSec
-      val mbPerSec = (count * 1024.0) / (1024.0 * 1024.0) / durationSec
+      // We don't know payload size in Spark exactly without guessing, but we can just report Msg/sec
+      // MB/s calculation in previous test assumed 1KB. We can make it generic or just remove it.
+      // Or we can pass payload size too.
+      val payloadSize = sys.props.getOrElse("pubsub.payload.size", "1024").toInt
+      val mbPerSec = (count * payloadSize.toDouble) / (1024.0 * 1024.0) / durationSec
       
       println("======================================================")
       println(s"Throughput Results (Local Machine):")

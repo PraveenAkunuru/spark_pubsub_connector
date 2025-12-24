@@ -28,7 +28,11 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
 
   
   private var currentOffset: Long = 0
-  private val pendingCommits = new scala.collection.mutable.HashSet[String]()
+  // Map of BatchID -> Remaining Cycles (TTL). 
+  // We keep a batch ID for a few cycles to ensure all executors have a chance to see it 
+  // and flush their reservoirs. Default TTL is 5 cycles.
+  private val pendingCommits = scala.collection.mutable.Map[String, Int]()
+  private val ACK_TTL_CYCLES = 5
 
   override def initialOffset(): Offset = PubSubOffset(0)
 
@@ -38,8 +42,8 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
 
   override def commit(end: Offset): Unit = {
     val batchId = end.json()
-    logInfo(s"Batch $batchId committed by Spark. Signal will be propagated in the next planning cycle.")
-    pendingCommits.add(batchId)
+    logInfo(s"Batch $batchId committed by Spark. Signal will be propagated for next $ACK_TTL_CYCLES cycles.")
+    pendingCommits.put(batchId, ACK_TTL_CYCLES)
   }
 
   override def stop(): Unit = {}
@@ -66,13 +70,28 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       requestedPartitions
     }
 
-    val committedSignals = pendingCommits.toList
+    // Decrement TTL for all pending commits and filter out expired ones
+    val expiredBatches = scala.collection.mutable.ListBuffer[String]()
+    pendingCommits.foreach { case (batchId, ttl) =>
+      if (ttl <= 1) {
+        expiredBatches += batchId
+      } else {
+        pendingCommits.update(batchId, ttl - 1)
+      }
+    }
+    expiredBatches.foreach(pendingCommits.remove)
+    
+    val committedSignals = pendingCommits.keys.toList
+    
     // Once prioritized for planning, we assume they will be acked by one of the tasks.
     // In a multi-executor environment, all executors on the cluster will receive this signal
     // and flush their local reservoirs for these batch IDs.
     
+    
+    val jitterMillis = options.getOrElse(PubSubConfig.JITTER_MS_KEY, PubSubConfig.DEFAULT_JITTER_MS).toInt
+
     (0 until numPartitions).map { i =>
-      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json())
+      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis)
     }.toArray
   }
 
@@ -96,7 +115,8 @@ case class PubSubInputPartition(
     projectId: String, 
     subscriptionId: String,
     committedBatchIds: List[String],
-    batchId: String) extends InputPartition
+    batchId: String,
+    jitterMillis: Int) extends InputPartition
 
 /**
  * Factory class that initializes `PubSubPartitionReader` on the executors.
@@ -127,7 +147,7 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
   private val reader = new NativeReader()
   logInfo(s"PubSubPartitionReader created for ${partition.subscriptionId}")
   
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId)
+  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis)
   if (nativePtr == 0) {
     throw new RuntimeException("Failed to initialize native Pub/Sub client.")
   }
@@ -226,7 +246,7 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
   extends PartitionReader[ColumnarBatch] with org.apache.spark.internal.Logging {
 
   private val reader = new NativeReader()
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId)
+  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis)
   private val allocator = new org.apache.arrow.memory.RootAllocator()
   private var currentBatch: ColumnarBatch = _
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
