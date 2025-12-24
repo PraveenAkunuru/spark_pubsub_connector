@@ -29,12 +29,17 @@ graph TD
     Spark[Spark Executor] -->|Writes Rows| DataWriter[PubSubDataWriter]
     DataWriter -->|Buffers| ArrowVec[Arrow FieldVector]
     ArrowVec -->|Exports FFI| JNI[JNI Bridge]
-    Spark -->|Reads Batch| PartitionReader[PubSubPartitionReader]
+    Spark -->|Columnar Reads| ColumnarReader[PubSubColumnarPartitionReader]
+    Spark -->|Row Reads| RowReader[PubSubPartitionReader]
+    ColumnarReader -->|Direct Arrow| JNI
+    RowReader -->|Row Conversion| JNI
     end
 
     subgraph Native Rust
     JNI -->|Imports FFI| NativeLib[Native Writer/Reader]
     NativeLib -->|Async gRPC| PubSubClient[Google Cloud Pub/Sub]
+    NativeLib -->|Off-Heap Reservoirs| AckReservoir[Ack Reservoir]
+    AckReservoir -->|Deadline extension| DeadlineMgr[Deadline Manager]
     end
 ```
 
@@ -43,18 +48,23 @@ graph TD
 ## 3. Core Modules
 
 ### 3.1. Read Path (Spark -> Pub/Sub)
-**Class**: `PubSubMicroBatchStream`, `PubSubPartitionReader`
+**Classes**: `PubSubMicroBatchStream`, `PubSubPartitionReader`, `PubSubColumnarPartitionReader`
 **Flow**:
-1.  **Planning**: `PubSubMicroBatchStream` defines input partitions based on configuration (Subscription ID).
-2.  **Execution**: `PubSubPartitionReader` initializes a `NativeReader` via JNI.
+1.  **Planning**: `PubSubMicroBatchStream` defines input partitions and propagates commit signals (Batch IDs) to executors.
+2.  **Execution**: Readers initialize a `NativeReader` via JNI.
 3.  **Fetch**:
-    - `reader.getNextBatch` is called.
+    - `reader.getNextBatch` is called with a `batchId`.
     - Rust performs a `StreamingPull` from Pub/Sub.
+    - Rust stores `ack_ids` in a **subscription-aware Native Reservoir**.
     - Rust converts `PubsubMessage`s into an `Arrow StructArray`.
     - Rust exports the array pointer via the C Data Interface.
 4.  **Consumption**:
-    - Scala imports the pointer into a `VectorSchemaRoot`.
-    - `ArrowUtils.getValue` maps Arrow types to Spark `InternalRow`s.
+    - **Vectorized Reader**: Imports the pointer and wraps vectors in `ArrowColumnVector` for zero-copy processing in Spark.
+    - **Standard Reader**: Iterates over Arrow increments and creates Spark `InternalRow`s.
+5.  **Signal Propagation**:
+    - On batch commit, Spark sends a batch ID signal.
+    - In the next planning cycle, this signal is passed to all executor tasks.
+    - Executors call `ackCommitted`, which flushes `ack_ids` from the Native Reservoir for the committed batches.
 
 ### 3.2. Write Path (Pub/Sub -> Spark)
 **Class**: `PubSubDataWriter`
@@ -65,10 +75,10 @@ graph TD
     - Scala exports the local Arrow Vector to a C-compatible struct (`FFI_ArrowArray`).
     - **Critical**: Scala calls `close()` on the local root, while Rust takes a reference.
 4.  **Publish**:
-    - Rust imports the FFI struct (Reference count +1).
-    - Rust converts Arrow rows to `PubsubMessage`s.
-    - Messages are published asynchronously via `tonic`.
-    - Rust drops the imported struct (Reference count -1), satisfying memory safety.
+    - Rust imports the FFI struct via **transmuted Mirrors** (bypassing `arrow-rs` strict pointer layouts for compatibility).
+    - Rust converts Arrow batches to `PubsubMessage`s via `ArrowBatchReader`.
+    - Messages are published asynchronously via an internal MPSC channel in `PublisherClient`.
+    - Panic protection (`catch_unwind`) ensures JNI errors don't crash the JVM.
 
 ---
 
@@ -90,12 +100,14 @@ All type conversions are centralized to ensure consistency.
 
 ---
 
-## 5. Build Structure (Multi-Module)
-To support Spark 4.0 (Scala 2.13) alongside Spark 3.5 (Scala 2.12), the project uses a multi-module `build.sbt`:
+## 5. Build Structure (Version Focused)
+The project identifies compatible Spark versions via dedicated sub-modules:
 
-- **`spark3`**: Targets Scala 2.12 / Spark 3.5 (Production).
-- **`spark4`**: Targets Scala 2.13 / Spark 4.0 (Experimental/Preview).
-- **`common`**: Both modules share source code from `src/main/scala` via `unmanagedSourceDirectories`.
+- **`spark33`**: Targets Spark 3.3.4 (Scala 2.12).
+- **`spark35`**: Targets Spark 3.5.0 (Scala 2.12) - Primary Target.
+- **`spark40`**: Targets Spark 4.0.0-preview2 (Scala 2.13).
+
+All modules share the core implementation in `src/main/scala` via `unmanagedSourceDirectories`.
 
 ---
 

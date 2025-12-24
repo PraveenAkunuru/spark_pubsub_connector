@@ -55,6 +55,8 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, throw new IllegalArgumentException(s"${PubSubConfig.PROJECT_ID_KEY} is required"))
   private val topicId = options.getOrElse(PubSubConfig.TOPIC_ID_KEY, throw new IllegalArgumentException(s"${PubSubConfig.TOPIC_ID_KEY} is required"))
   private val batchSize = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
+  private val lingerMs = options.getOrElse(PubSubConfig.LINGER_MS_KEY, PubSubConfig.DEFAULT_LINGER_MS.toString).toLong
+  private val maxBatchBytes = options.getOrElse(PubSubConfig.MAX_BATCH_BYTES_KEY, "5242880").toLong // 5MB default
   
   private val writer = new NativeWriter()
   logInfo(s"PubSubDataWriter created for $projectId/$topicId, partitionId: $partitionId, taskId: $taskId")
@@ -71,6 +73,8 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private var root = org.apache.arrow.vector.VectorSchemaRoot.create(ArrowUtils.toArrowSchema(schema), allocator)
   private var vectors = schema.fields.map(f => root.getVector(f.name))
   private var rowCount = 0
+  private var currentBatchBytes = 0L
+  private var lastFlushTime = System.currentTimeMillis()
 
   override def write(record: InternalRow): Unit = {
     // Append row to vectors
@@ -79,7 +83,13 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
     }
     rowCount += 1
     
-    if (rowCount >= batchSize) {
+    // Estimate size (rough check)
+    if (rowCount % 100 == 0) {
+       currentBatchBytes = vectors.map(_.getBufferSize.toLong).sum
+    }
+
+    val now = System.currentTimeMillis()
+    if (rowCount >= batchSize || currentBatchBytes >= maxBatchBytes || (now - lastFlushTime >= lingerMs)) {
       flush()
     }
   }
@@ -120,6 +130,8 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
     root = org.apache.arrow.vector.VectorSchemaRoot.create(ArrowUtils.toArrowSchema(schema), allocator)
     vectors = schema.fields.map(f => root.getVector(f.name))
     rowCount = 0
+    currentBatchBytes = 0
+    lastFlushTime = System.currentTimeMillis()
   }
 
   override def commit(): WriterCommitMessage = {

@@ -1548,6 +1548,7 @@ dependencies = [
  "openssl",
  "prost",
  "prost-types",
+ "rand",
  "robusta_jni",
  "serde",
  "serde_json",

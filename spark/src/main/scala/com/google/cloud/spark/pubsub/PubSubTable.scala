@@ -59,6 +59,12 @@ class PubSubScan(schema: StructType, options: CaseInsensitiveStringMap) extends 
   override def readSchema(): StructType = schema
   
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
-    new PubSubMicroBatchStream(schema, options.asCaseSensitiveMap().asScala.toMap)
+    new PubSubMicroBatchStream(schema, options.asCaseSensitiveMap().asScala.toMap, checkpointLocation)
+  }
+
+  override def supportedCustomMetrics(): Array[org.apache.spark.sql.connector.metric.CustomMetric] = {
+    Array(
+      new PubSubCustomMetric("pubsub_backlog_count", "Number of messages held in the native reservoir (unacknowledged)")
+    )
   }
 }

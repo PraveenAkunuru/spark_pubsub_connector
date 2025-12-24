@@ -11,4 +11,7 @@ object PubSubConfig {
   val NUM_PARTITIONS_DEFAULT = "1"
   val BATCH_SIZE_KEY = "batchSize"
   val DEFAULT_BATCH_SIZE = 1000
+  val LINGER_MS_KEY = "lingerMs"
+  val DEFAULT_LINGER_MS = 1000
+  val MAX_BATCH_BYTES_KEY = "maxBatchBytes"
 }

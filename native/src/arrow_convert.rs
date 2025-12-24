@@ -178,28 +178,35 @@ mod tests {
     fn test_arrow_batch_builder() {
         let mut builder = ArrowBatchBuilder::new();
         
-        let msg1 = PubsubMessage {
-            data: b"payload1".to_vec(),
-            attributes: Default::default(),
-            message_id: "id1".to_string(),
-            publish_time: Some(prost_types::Timestamp { seconds: 1600000000, nanos: 0 }),
-            ordering_key: "".to_string(),
+        let msg1 = ReceivedMessage {
+            ack_id: "ack1".to_string(),
+            message: Some(PubsubMessage {
+                data: b"payload1".to_vec(),
+                attributes: Default::default(),
+                message_id: "id1".to_string(),
+                publish_time: Some(prost_types::Timestamp { seconds: 1600000000, nanos: 0 }),
+                ordering_key: "".to_string(),
+            }),
+            delivery_attempt: 0,
         };
         
         builder.append(&msg1);
         
         let (arrays, schema) = builder.finish();
         
-        assert_eq!(arrays.len(), 3);
-        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(arrays.len(), 4); // message_id, publish_time, payload, ack_id
+        assert_eq!(schema.fields().len(), 4);
         
         let id_array = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
         assert_eq!(id_array.value(0), "id1");
         
         let ts_array = arrays[1].as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
-        assert_eq!(ts_array.value(0), 1600000000_000_000);
+        assert_eq!(ts_array.value(0), 1_600_000_000_000_000);
         
         let payload_array = arrays[2].as_any().downcast_ref::<BinaryArray>().unwrap();
         assert_eq!(payload_array.value(0), b"payload1");
+
+        let ack_array = arrays[3].as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(ack_array.value(0), "ack1");
     }
 }

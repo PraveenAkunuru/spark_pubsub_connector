@@ -27,3 +27,4 @@ tokio-stream = "0.1"
 # Pin home crate to avoid edition 2024 issue
 home = "=0.5.9"
 openssl = { version = "0.10", features = ["vendored"] }
+rand = "0.8"

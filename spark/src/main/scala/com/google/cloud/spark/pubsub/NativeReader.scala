@@ -23,12 +23,23 @@ class NativeReader {
    * Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.
    * Returns 1 if messages were fetched, 0 if empty, or negative on error.
    */
-  @native def getNextBatch(readerPtr: Long, arrowArrayAddr: Long, arrowSchemaAddr: Long): Int
+  @native def getNextBatch(readerPtr: Long, batchId: String, arrowArrayAddr: Long, arrowSchemaAddr: Long): Int
 
   /**
    * Sends an asynchronous Acknowledgment request for the given list of message IDs.
    */
   @native def acknowledge(readerPtr: Long, ackIds: java.util.List[String]): Int
+
+
+  /**
+   * Flushes the native reservoir for the given committed batches.
+   */
+  @native def ackCommitted(readerPtr: Long, batchIds: java.util.List[String]): Int
+
+  /**
+   * Returns the count of messages currently held in the off-heap Ack Reservoir.
+   */
+  @native def getUnackedCount(readerPtr: Long): Int
 
   /**
    * Shuts down the native client and releases associated resources (runtime, connections).
