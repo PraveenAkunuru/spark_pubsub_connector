@@ -163,22 +163,23 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
 
   override def close(): Unit = {
     if (!closed) {
-      // NOTE: We might be called by TaskCompletionListener on failure.
-      // If so, we still attempt to flush/close native writer.
-      // If native writer fails, we log it but maybe shouldn't re-throw if task is already failed?
-      // Spark's TaskContext doesn't easily say if task is failed vs success in listener (except maybe by tracking yourself).
-      // For now, we keep original behavior: throw if close fails.
-      val res = writer.close(nativePtr, flushTimeoutMs)
-      if (res < 0) {
-        logError(s"NativeWriter.close failed with code $res")
-        throw new RuntimeException(s"NativeWriter.close failed with code $res")
+      try {
+        val res = writer.close(nativePtr, flushTimeoutMs)
+        if (res < 0) {
+          logError(s"NativeWriter.close failed with code $res")
+          throw new RuntimeException(s"NativeWriter.close failed with code $res")
+        }
+      } finally {
+        // ALWAYS set closed = true and release Arrow resources.
+        // On the Rust side, NativeWriter.close always consumes the pointer (Box::from_raw),
+        // so we MUST NOT call it again even if it failed (e.g. timeout).
+        closed = true
+        if (root != null) {
+          root.close()
+        }
+        allocator.close()
+        logInfo(s"PubSubDataWriter closed for partitionId: $partitionId")
       }
-      if (root != null) {
-        root.close()
-      }
-      allocator.close()
-      closed = true
-      logInfo(s"PubSubDataWriter closed for partitionId: $partitionId")
     }
   }
 }

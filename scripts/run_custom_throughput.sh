@@ -37,11 +37,11 @@ docker run -d --name custom_emulator -p 8088:8085 gcr.io/google.com/cloudsdktool
 
 echo "Waiting for emulator..."
 sleep 10
-export PUBSUB_EMULATOR_HOST=localhost:8088
+export PUBSUB_EMULATOR_HOST=127.0.0.1:8088
 
 # Create resources
-curl -s -X PUT "http://localhost:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
-curl -s -X PUT "http://localhost:8088/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
+curl -s -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
+curl -s -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
   -H "Content-Type: application/json" \
   -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
 
@@ -71,7 +71,7 @@ for b in $(seq 1 ${NUM_BATCHES}); do
   done
   echo -n "]}" >> "$PAYLOAD_FILE"
   
-  curl -s -X POST "http://localhost:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}:publish" \
+  curl -s -X POST "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}:publish" \
     -H "Content-Type: application/json" \
     --data-binary @"$PAYLOAD_FILE" > /dev/null
   rm "$PAYLOAD_FILE"
@@ -80,7 +80,7 @@ done
 echo "Running Spark Test..."
 cd ../spark
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/javax.security.auth=ALL-UNNAMED"
 
 # Pass custom project/sub/topic via system properties if test supports it, or ENV vars.
 # Integration tests currently hardcode or read from PubSubConfig defaults if not specified.
@@ -105,7 +105,7 @@ export TEST_MASTER="${TEST_MASTER:-local[4]}"
 
 # Run in background to allow trap to kill it
 # Note: sbt might need javaOptions to pass -D, but Env vars work reliably.
-$JAVA_HOME/bin/java $JPMS_FLAGS \
+$JAVA_HOME/bin/java $JPMS_FLAGS -Xmx2g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
     -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest" &
 TEST_PID=$!

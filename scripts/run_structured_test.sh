@@ -27,15 +27,15 @@ docker run -d --name pubsub_emulator_struct -p 8085:8085 gcr.io/google.com/cloud
 echo "Waiting for emulator to be ready..."
 sleep 10
 
-export PUBSUB_EMULATOR_HOST=localhost:${EMULATOR_PORT}
+export PUBSUB_EMULATOR_HOST=127.0.0.1:${EMULATOR_PORT}
 
 # Create Topic
 echo "Creating Topic ${TOPIC_ID}..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
+curl -s -X PUT "http://127.0.0.1:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
 
 # Create Subscription
 echo "Creating Subscription ${SUB_ID}..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
+curl -s -X PUT "http://127.0.0.1:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
   -H "Content-Type: application/json" \
   -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
 
@@ -62,10 +62,11 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
   --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
   --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED \
   --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
-  --add-opens=java.base/sun.util.logging=ALL-UNNAMED"
+  --add-opens=java.base/sun.util.logging=ALL-UNNAMED \
+  --add-opens=java.base/javax.security.auth=ALL-UNNAMED"
 
 cd ../spark
 export RUST_LOG=info
-$JAVA_HOME/bin/java $JPMS_FLAGS \
+$JAVA_HOME/bin/java $JPMS_FLAGS -Xmx2g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
     -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.StructuredReadTest"

@@ -43,7 +43,7 @@ impl ArrowBatchBuilder {
                 .fields()
                 .iter()
                 .filter(|f| {
-                    !["message_id", "publish_time", "ack_id", "attributes"]
+                    !["message_id", "publish_time", "payload", "ack_id", "attributes"]
                         .contains(&f.name().as_str())
                 })
                 .map(|f| f.as_ref().clone())
@@ -54,13 +54,15 @@ impl ArrowBatchBuilder {
                 builders.push(arrow::array::make_builder(f.data_type(), 1024));
             }
 
+            let has_payload = s.fields().iter().any(|f| f.name() == "payload");
+
             Self {
                 message_ids: StringBuilder::new(),
                 publish_times: TimestampMicrosecondBuilder::new(),
                 ack_ids: StringBuilder::new(),
                 attributes: MapBuilder::new(None, StringBuilder::new(), StringBuilder::new()),
                 is_raw: false,
-                payloads: None,
+                payloads: if has_payload { Some(BinaryBuilder::new()) } else { None },
                 struct_builders: Some(builders),
                 struct_fields: allowed_fields,
                 format,
@@ -108,9 +110,11 @@ impl ArrowBatchBuilder {
             .append(true)
             .expect("Failed to append attributes map");
 
-        if self.is_raw {
-            self.payloads.as_mut().unwrap().append_value(&msg.data);
-        } else {
+        if let Some(p) = self.payloads.as_mut() {
+            p.append_value(&msg.data);
+        }
+
+        if !self.is_raw {
             // Structured Mode
             let builders = self.struct_builders.as_mut().unwrap();
             let fields = &self.struct_fields;
@@ -480,15 +484,19 @@ impl ArrowBatchBuilder {
             attributes_array,
         ];
 
-        if self.is_raw {
-            let payload_array = Arc::new(self.payloads.as_mut().unwrap().finish()) as ArrayRef;
+        if let Some(p) = self.payloads.as_mut() {
+            let payload_array = Arc::new(p.finish()) as ArrayRef;
             fields.insert(2, Field::new("payload", DataType::Binary, true));
             arrays.insert(2, payload_array);
-        } else if let Some(builders) = self.struct_builders.as_mut() {
-            for (i, builder) in builders.iter_mut().enumerate() {
-                let arr = builder.finish();
-                arrays.push(arr);
-                fields.push(self.struct_fields[i].clone());
+        }
+
+        if !self.is_raw {
+            if let Some(builders) = self.struct_builders.as_mut() {
+                for (i, builder) in builders.iter_mut().enumerate() {
+                    let arr = builder.finish();
+                    arrays.push(arr);
+                    fields.push(self.struct_fields[i].clone());
+                }
             }
         }
 

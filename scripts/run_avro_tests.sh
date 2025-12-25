@@ -26,15 +26,15 @@ docker run -d --name pubsub_emulator -p ${EMULATOR_PORT}:${EMULATOR_PORT} gcr.io
 echo "Waiting for emulator..."
 sleep 10
 
-export PUBSUB_EMULATOR_HOST=localhost:${EMULATOR_PORT}
+export PUBSUB_EMULATOR_HOST=127.0.0.1:${EMULATOR_PORT}
 
 # 2. Create Topic
 echo "Creating Topic $TOPIC_ID..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
+curl -s -X PUT "http://127.0.0.1:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
 
 # 3. Create Subscription
 echo "Creating Subscription $SUB_ID..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
+curl -s -X PUT "http://127.0.0.1:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
   -H "Content-Type: application/json" \
   -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
 
@@ -43,6 +43,8 @@ echo "Running AvroIntegrationTest..."
 if [ -z "$JAVA_HOME" ]; then
     export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 fi
+
+export RUST_LOG=info
 
 JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
   --add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
@@ -59,10 +61,11 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
   --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
   --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED \
   --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
-  --add-opens=java.base/sun.util.logging=ALL-UNNAMED"
+  --add-opens=java.base/sun.util.logging=ALL-UNNAMED \
+  --add-opens=java.base/javax.security.auth=ALL-UNNAMED"
 
 cd ../spark
-$JAVA_HOME/bin/java $JPMS_FLAGS \
+$JAVA_HOME/bin/java $JPMS_FLAGS -Xmx2g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -Dpubsub.emulator.host=localhost:${EMULATOR_PORT} \
+    -Dpubsub.emulator.host=127.0.0.1:${EMULATOR_PORT} \
     -jar sbt-launch.jar spark35/clean spark35/update "spark35/testOnly com.google.cloud.spark.pubsub.AvroIntegrationTest"

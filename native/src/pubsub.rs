@@ -22,6 +22,22 @@ use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
 
 use google_cloud_googleapis::pubsub::v1::StreamingPullRequest;
 use tokio::sync::mpsc::Sender;
+use std::sync::OnceLock;
+use tokio::runtime::Runtime;
+
+static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+/// Returns a reference to the global Tokio runtime.
+/// It is lazily initialized on the first call.
+pub fn get_runtime() -> &'static Runtime {
+    GLOBAL_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("pubsub-native-worker")
+            .build()
+            .expect("Failed to create global Tokio runtime")
+    })
+}
 
 /// A low-latency subscriber client that manages a background `StreamingPull` task.
 /// It uses a bounded MPSC channel to buffer messages received from the gRPC stream.
@@ -130,6 +146,9 @@ impl PubSubClient {
                                 resp_res = stream.message(), if !tx_full => {
                                     match resp_res {
                                         Ok(Some(resp)) => {
+                                            if !resp.received_messages.is_empty() {
+                                                log::info!("Rust: Received {} messages from StreamingPull", resp.received_messages.len());
+                                            }
                                             for msg in resp.received_messages {
                                                 pending_messages.push_back(msg);
                                             }
@@ -181,7 +200,7 @@ impl PubSubClient {
         while batch.len() < batch_size {
              match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
                  Ok(Some(msg)) => {
-                     // eprintln!("Rust: Received message from channel: {}", msg.ack_id);
+                     log::info!("Rust: Passing message to Spark: {}", msg.ack_id);
                      batch.push(msg);
                  },
                  Ok(None) => {
@@ -194,6 +213,7 @@ impl PubSubClient {
                  Err(_) => break, // timeout
              }
         }
+        log::info!("Rust: fetch_batch returning {} messages", batch.len());
         Ok(batch)
     }
     
@@ -352,11 +372,13 @@ impl PublisherClient {
         let header_val_clone = header_val.clone(); // Clone header_val for the spawned task
 
         tokio::spawn(async move {
+            log::debug!("Rust: Publisher background task started for topic: {}", topic);
             while let Some(cmd) = rx.recv().await {
                 match cmd {
                     WriterCommand::Publish(messages) => {
                          if messages.is_empty() { continue; }
                         
+                        log::debug!("Rust: Publishing batch of {} messages to {}", messages.len(), topic);
                         let req = google_cloud_googleapis::pubsub::v1::PublishRequest {
                             topic: topic.clone(),
                             messages,
@@ -375,7 +397,10 @@ impl PublisherClient {
                             }
                             
                             match client.publish(request).await {
-                                Ok(_) => break, // Success
+                                Ok(_) => {
+                                    log::debug!("Rust: Publish batch successful");
+                                    break;
+                                }, // Success
                                 Err(e) => {
                                     let code = e.code();
                                     if code == tonic::Code::NotFound || code == tonic::Code::PermissionDenied || code == tonic::Code::InvalidArgument {
@@ -391,6 +416,7 @@ impl PublisherClient {
                         }
                     },
                     WriterCommand::Flush(ack_tx) => {
+                        log::debug!("Rust: Flush command received, acking oneshot");
                         // Because we process commands sequentially in this loop,
                         // by the time we reach here, all previous Publish commands are finished.
                         let _ = ack_tx.send(());

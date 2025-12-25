@@ -29,6 +29,7 @@ lazy val javaOpts = Seq(
   "--add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED",
   "--add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED",
   "--add-opens=java.base/sun.util.logging=ALL-UNNAMED",
+  "--add-opens=java.base/javax.security.auth=ALL-UNNAMED",
   "-Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false",
   "-Darrow.memory.debug.allocator=false",
   "-Dio.netty.tryReflectionSetAccessible=true"

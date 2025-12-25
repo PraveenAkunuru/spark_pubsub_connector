@@ -20,8 +20,8 @@ static SENDER: OnceLock<mpsc::Sender<(Level, String)>> = OnceLock::new();
 struct JniLogger;
 
 impl Log for JniLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info // Default to Info
+    fn enabled(&self, _metadata: &Metadata) -> bool {
+        true // we filter via set_max_level
     }
 
     fn log(&self, record: &Record) {
@@ -48,7 +48,15 @@ pub fn init(vm: JavaVM) {
         }
 
         log::set_logger(&JniLogger).unwrap();
-        log::set_max_level(log::LevelFilter::Info);
+        let level_filter = match std::env::var("RUST_LOG").ok().as_deref() {
+            Some("error") => log::LevelFilter::Error,
+            Some("warn") => log::LevelFilter::Warn,
+            Some("info") => log::LevelFilter::Info,
+            Some("debug") => log::LevelFilter::Debug,
+            Some("trace") => log::LevelFilter::Trace,
+            _ => log::LevelFilter::Info,
+        };
+        log::set_max_level(level_filter);
 
         // Spawn background thread to drain logs to JNI
         thread::spawn(move || {

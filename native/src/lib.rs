@@ -98,7 +98,6 @@ mod jni {
     use robusta_jni::jni::JNIEnv;
     use robusta_jni::jni::objects::AutoLocal;
     use robusta_jni::jni::sys::jlong;
-    use tokio::runtime::Runtime;
     use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
     use arrow::array::{Array, StructArray};
     
@@ -149,14 +148,8 @@ mod jni {
                     (None, crate::arrow_convert::DataFormat::Json, None)
                 };
 
-                // Create Tokio Runtime
-                let rt = match Runtime::new() {
-                    Ok(r) => r,
-                    Err(e) => {
-                        log::error!("Rust: Failed to create Tokio runtime: {:?}", e);
-                        return 0;
-                    }
-                };
+                // Use Global Runtime
+                let rt = crate::pubsub::get_runtime();
                 
                 // Create Publisher Client
                 let client_res = rt.block_on(async {
@@ -165,8 +158,7 @@ mod jni {
 
                 match client_res {
                     Ok(client) => {
-                        // Start the deadline manager explicitly if needed (usually tied to client lifecycle or global)
-                        crate::pubsub::start_deadline_manager(&rt);
+                        crate::pubsub::start_deadline_manager(rt);
 
                         let reader = Box::new(crate::RustPartitionReader {
                             rt,
@@ -196,6 +188,7 @@ mod jni {
                 // SAFETY: Java side provides valid pointers to FFI structures
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
                 
+                log::info!("Rust: getNextBatch called for batch: {}", &batch_id);
                 let msgs = match reader.rt.block_on(async {
                     reader.client.fetch_batch(1000).await
                 }) {
@@ -214,7 +207,7 @@ mod jni {
                 let ack_ids: Vec<String> = msgs.iter().map(|m| m.ack_id.clone()).collect();
                 {
                     let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                    reservoir.entry(batch_id).or_insert_with(std::collections::HashMap::new)
+                    reservoir.entry(batch_id.clone()).or_insert_with(std::collections::HashMap::new)
                         .entry(reader.client.subscription_name.clone()).or_insert_with(Vec::new)
                         .extend(ack_ids);
                 }
@@ -254,6 +247,7 @@ mod jni {
                     std::ptr::write(out_schema_ptr, schema_val);
                 }
                 
+                log::info!("Rust: getNextBatch returning success (1) for batch: {}", &batch_id);
                 1
             })
         }
@@ -362,7 +356,7 @@ mod jni {
                 let delay_ms = rand::Rng::gen_range(&mut rng, 0..500);
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 
-                let rt = Runtime::new().expect("Failed to create Tokio runtime for writer");
+                let rt = crate::pubsub::get_runtime();
                 
                 let client_res = rt.block_on(async {
                     crate::pubsub::PublisherClient::new(&project_id, &topic_id).await
@@ -549,8 +543,8 @@ mod jni {
 /// This struct holds the resources needed to pull messages from Pub/Sub and convert them
 /// to Arrow batches. It is maintained in Rust memory and referenced by Spark via a raw pointer.
 pub struct RustPartitionReader {
-    /// Dedicated Tokio runtime for async I/O.
-    rt: Runtime,
+    /// Reference to global Tokio runtime.
+    rt: &'static Runtime,
     /// Pub/Sub client instance.
     client: PubSubClient,
     /// Optional Arrow schema for structured parsing.
@@ -565,8 +559,8 @@ pub struct RustPartitionReader {
 /// 
 /// This struct holds the resources needed to publish messages to Pub/Sub.
 pub struct RustPartitionWriter {
-    /// Dedicated Tokio runtime for async I/O.
-    rt: Runtime,
+    /// Reference to global Tokio runtime.
+    rt: &'static Runtime,
     /// Pub/Sub publisher client instance.
     client: crate::pubsub::PublisherClient,
 }

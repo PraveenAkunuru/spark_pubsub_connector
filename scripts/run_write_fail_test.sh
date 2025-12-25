@@ -20,24 +20,39 @@ docker run -d --name write_fail_emulator -p 8091:8085 gcr.io/google.com/cloudsdk
 
 echo "Waiting for emulator..."
 sleep 10
-export PUBSUB_EMULATOR_HOST=localhost:8091
+export PUBSUB_EMULATOR_HOST=127.0.0.1:8091
 
 # We intentionally do NOT create the topic.
 
 echo "Running PubSubWriteIntegrationTest with MISSING Topic..."
 cd ../spark
-JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+if [ -z "$JAVA_HOME" ]; then
+    export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+fi
 
-# Export Env vars for the test (assuming test reads them or we use same names)
-# NOTE: PubSubWriteIntegrationTest might hardcode names. 
-# If it hardcodes "spark-test-project" / "test-topic", we should use those but ensure they are NOT created.
-# Let's override headers/logic if possible via Env, but if not, we rely on emulator being empty.
-# If test creates resources, this test is invalid.
-# PubSubWriteIntegrationTest usually Expects pre-created topic?
-# Based on `run_write_verification.sh`, it creates resources BEFORE running test.
-# So the Scala test probably DOES NOT create them independently (or assumes they exist).
+export RUST_LOG=info
 
-if "$JAVA_HOME/bin/java" -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.PubSubWriteIntegrationTest"; then
+JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
+  --add-opens=java.base/java.lang.invoke=ALL-UNNAMED \
+  --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
+  --add-opens=java.base/java.io=ALL-UNNAMED \
+  --add-opens=java.base/java.net=ALL-UNNAMED \
+  --add-opens=java.base/java.nio=ALL-UNNAMED \
+  --add-opens=java.base/java.util=ALL-UNNAMED \
+  --add-opens=java.base/java.util.concurrent=ALL-UNNAMED \
+  --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
+  --add-opens=java.base/sun.nio.cs=ALL-UNNAMED \
+  --add-opens=java.base/sun.security.action=ALL-UNNAMED \
+  --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
+  --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED \
+  --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
+  --add-opens=java.base/sun.util.logging=ALL-UNNAMED \
+  --add-opens=java.base/javax.security.auth=ALL-UNNAMED"
+
+if "$JAVA_HOME/bin/java" $JPMS_FLAGS -Xmx2g \
+    -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
+    -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.PubSubWriteIntegrationTest"; then
   echo "TEST FAILED: Spark job succeeded unexpectedly!"
   exit 1
 else
