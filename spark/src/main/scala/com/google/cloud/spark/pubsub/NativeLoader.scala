@@ -1,6 +1,6 @@
 package com.google.cloud.spark.pubsub
 
-import java.io.{File, FileOutputStream, InputStream}
+import java.io.{File, FileOutputStream}
 import java.nio.file.Files
 
 /**
@@ -36,7 +36,8 @@ object NativeLoader {
 
   private def loadFromClasspath(): Unit = {
     val platformPath = getPlatformPath
-    val resourcePath = s"/$platformPath/lib$LIB_NAME.so"
+    val extension = if (platformPath.startsWith("darwin")) "dylib" else "so"
+    val resourcePath = s"/$platformPath/lib$LIB_NAME.$extension"
     
     val inputStream = getClass.getResourceAsStream(resourcePath)
     if (inputStream == null) {
@@ -46,7 +47,7 @@ object NativeLoader {
     try {
       val tempDir = Files.createTempDirectory("spark_pubsub_native").toFile
       tempDir.deleteOnExit()
-      val tempFile = new File(tempDir, s"lib$LIB_NAME.so")
+      val tempFile = new File(tempDir, s"lib$LIB_NAME.$extension")
       tempFile.deleteOnExit()
 
       val outputStream = new FileOutputStream(tempFile)

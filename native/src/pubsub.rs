@@ -15,7 +15,7 @@ use google_cloud_token::TokenSourceProvider;
 use tonic::{transport::Channel, Request};
 use tonic::metadata::MetadataValue;
 use tokio::sync::mpsc::{self, Receiver};
-use tokio::time::Duration;
+use tokio::time::{Duration, Instant};
 use std::str::FromStr;
 
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
@@ -247,10 +247,10 @@ static CONNECTION_POOL: Lazy<Mutex<HashMap<String, Channel>>> = Lazy::new(|| {
 });
 
 /// Type alias for the off-heap reservoir structure.
-type AckReservoirMap = HashMap<String, HashMap<String, Vec<String>>>;
+/// Map<BatchId, (InsertionTime, Map<SubscriptionName, Vec<AckId>>)>
+type AckReservoirMap = HashMap<String, (Instant, HashMap<String, Vec<String>>)>;
 
 /// Global off-heap reservoir for ack_ids waiting for Spark commit signals.
-/// Map<BatchId, Map<SubscriptionName, Vec<AckId>>>
 pub(crate) static ACK_RESERVOIR: Lazy<Mutex<AckReservoirMap>> = Lazy::new(|| {
     Mutex::new(HashMap::new())
 });
@@ -266,9 +266,17 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             
             let snapshot: Vec<(String, Vec<String>)> = {
-                let reservoir = ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
+                let mut reservoir = ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
+                
+                // 1. Purge entries older than 30 minutes (prevent OOM from abandoned batches)
+                let now = Instant::now();
+                let ttl = Duration::from_secs(30 * 60);
+                reservoir.retain(|_id, (time, _)| {
+                    now.duration_since(*time) < ttl
+                });
+
                 let mut all = Vec::new();
-                for (_batch_id, subs) in reservoir.iter() {
+                for (_, (_, subs)) in reservoir.iter() {
                     for (sub, ids) in subs {
                         if !ids.is_empty() {
                             all.push((sub.clone(), ids.clone()));

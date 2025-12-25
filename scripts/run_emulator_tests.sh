@@ -22,7 +22,7 @@ echo "Starting Pub/Sub Emulator (Docker)..."
 # 1. Start Pub/Sub emulator in Docker
 cleanup
 docker run -d --name pubsub_emulator -p 8085:8085 gcr.io/google.com/cloudsdktool/cloud-sdk:latest \
-    gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=${PROJECT_ID}
+    gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=spark-test-project
 
 # Wait for emulator
 echo "Waiting for emulator to be ready..."
@@ -30,23 +30,45 @@ sleep 10
 
 export PUBSUB_EMULATOR_HOST=localhost:${EMULATOR_PORT}
 
-# Create Topic
-echo "Creating Topic..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
+# Function to create topic and sub for a project
+create_resources() {
+  local project=$1
+  local topic=$2
+  local sub=$3
+  echo "Creating resources for project: $project, topic: $topic, sub: $sub"
+  curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${project}/topics/${topic}"
+  if [ ! -z "$sub" ]; then
+    curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${project}/subscriptions/${sub}" \
+      -H "Content-Type: application/json" \
+      -d "{\"topic\": \"projects/${project}/topics/${topic}\"}"
+  fi
+}
 
-# Create Subscription
-echo "Creating Subscription..."
-curl -s -X PUT "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
-  -H "Content-Type: application/json" \
-  -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
+# Create Resources for all Integration Tests
+create_resources "spark-test-project" "test-topic" "test-sub"
+create_resources "write-scale-project" "scale-topic" ""
+create_resources "spark-test-project" "struct-topic" "struct-sub"
+create_resources "throughput-test-project" "throughput-topic" "throughput-sub"
+create_resources "scale-test-project" "scale-topic" "scale-sub"
 
-# Publish Messages
-echo "Publishing Messages..."
+# Publish Initial Messages for EmulatorIntegrationTest
+echo "Publishing Messages to test-topic..."
 for i in {1..10}; do
   MSG_DATA=$(echo -n "{\"id\": $i, \"data\": \"value_$i\"}" | base64)
-  curl -s -X POST "http://localhost:${EMULATOR_PORT}/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}:publish" \
+  curl -s -X POST "http://localhost:${EMULATOR_PORT}/v1/projects/spark-test-project/topics/test-topic:publish" \
     -H "Content-Type: application/json" \
     -d "{\"messages\": [{\"data\": \"${MSG_DATA}\"}]}"
+done
+
+# Publish 10,000 Messages for ScaleIntegrationTest
+echo "Publishing 10,000 Messages to scale-topic..."
+# Using a slightly faster way to publish in batches if possible, but 10k single requests is ok for local emulator
+for i in {1..10000}; do
+  if (( i % 2500 == 0 )); then echo "Published $i..."; fi
+  MSG_DATA=$(echo -n "{\"id\": $i, \"data\": \"scale_value_$i\"}" | base64)
+  curl -s -X POST "http://localhost:${EMULATOR_PORT}/v1/projects/scale-test-project/topics/scale-topic:publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"messages\": [{\"data\": \"${MSG_DATA}\"}]}" > /dev/null
 done
 
 # Run Tests
@@ -77,4 +99,4 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
 cd ../spark
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -jar sbt-launch.jar spark35/clean spark35/update spark35/test
+    -jar sbt-launch.jar "spark35/testOnly *EmulatorIntegrationTest *StructuredReadTest"

@@ -41,10 +41,13 @@ lazy val copyNativeLibs = taskKey[Unit]("Copies native libraries to resources")
 
 lazy val commonSettings = Seq(
   version := "0.1.0",
+  javacOptions ++= Seq("-source", "1.8", "-target", "1.8"),
+  scalacOptions ++= Seq("-target:jvm-1.8", "-Xlint", "-deprecation", "-feature"),
   fork in Test := true,
   envVars in Test := Map(
     "PUBSUB_EMULATOR_HOST" -> sys.env.getOrElse("PUBSUB_EMULATOR_HOST", "localhost:8085")
   ),
+  libraryDependencies += "com.google.cloud" % "google-cloud-core" % "2.33.0",
   copyNativeLibs := {
     val log = streams.value.log
     // baseDirectory is modules/spark35, parent is spark, parent parent is root
@@ -63,10 +66,9 @@ lazy val commonSettings = Seq(
       val platformDir = resourceDir / s"$osName-$archName"
       if (!platformDir.exists()) platformDir.mkdirs()
       
-      val libName = "libnative_pubsub_connector.so" // Or .dylib for mac, but rust produces .so/.dylib
+      val extension = if (osName == "darwin") "dylib" else "so"
+      val libName = s"libnative_pubsub_connector.$extension"
       val sourceFile = nativeTarget / libName
-      // On mac rust might produce .dylib? cargo build produces .dylib on mac?
-      // For now assuming linux/so or user handles it.
       
       if (sourceFile.exists()) {
         val destFile = platformDir / libName
@@ -108,9 +110,9 @@ lazy val spark35 = (project in file("spark35"))
     name := "spark-pubsub-connector-3.5",
     scalaVersion := "2.12.18",
     libraryDependencies ++= Seq(
-      "org.apache.spark" %% "spark-core" % "3.5.0",
-      "org.apache.spark" %% "spark-sql" % "3.5.0",
-      "org.apache.spark" %% "spark-catalyst" % "3.5.0",
+      "org.apache.spark" %% "spark-core" % "3.5.3",
+      "org.apache.spark" %% "spark-sql" % "3.5.3",
+      "org.apache.spark" %% "spark-catalyst" % "3.5.3",
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",

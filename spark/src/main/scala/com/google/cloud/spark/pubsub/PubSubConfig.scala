@@ -33,6 +33,31 @@ object PubSubConfig {
   val AVRO_SCHEMA_KEY = "avroSchema"
 
   /**
+   * Helper to retrieve a configuration value with the following precedence:
+   * 1. Explicitly provided option in .option()
+   * 2. Global Spark configuration (spark.pubsub.<key>)
+   * 3. Environment variable or system default (for projectId)
+   */
+  def getOption(key: String, options: Map[String, String], sparkSession: org.apache.spark.sql.SparkSession): Option[String] = {
+    options.get(key)
+      .orElse(sparkSession.conf.getOption(s"spark.pubsub.$key"))
+      .orElse {
+        if (key == PROJECT_ID_KEY) {
+          Option(System.getenv("GOOGLE_CLOUD_PROJECT"))
+            .orElse(Option(System.getProperty("google.cloud.project")))
+            // Fallback to cloud core if available, otherwise None
+            .orElse(try {
+              Option(com.google.cloud.ServiceOptions.getDefaultProjectId)
+            } catch {
+              case _: Throwable => None
+            })
+        } else {
+          None
+        }
+      }
+  }
+
+  /**
    * Constructs the JSON configuration string used to initialize the native data plane.
    * 
    * @param schema Spark schema for projection.

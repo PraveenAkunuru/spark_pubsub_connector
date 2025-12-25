@@ -22,8 +22,9 @@ import org.apache.spark.sql.SparkSession
 class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], checkpointLocation: String) 
   extends MicroBatchStream with org.apache.spark.internal.Logging {
 
-  private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, "")
-  private val subscriptionId = options.getOrElse(PubSubConfig.SUBSCRIPTION_ID_KEY, "")
+  private val spark = SparkSession.active
+  private val projectId = PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, options, spark).getOrElse("")
+  private val subscriptionId = PubSubConfig.getOption(PubSubConfig.SUBSCRIPTION_ID_KEY, options, spark).getOrElse("")
 
   
   private var currentOffset: Long = 0
@@ -58,10 +59,11 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
    */
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
     logDebug(s"planInputPartitions called with start=$start, end=$end")
-    val defaultParallelism = SparkSession.active.sparkContext.defaultParallelism
+    val defaultParallelism = spark.sparkContext.defaultParallelism
 
     val maxPartitions = defaultParallelism * 2
-    val requestedPartitions = options.getOrElse(PubSubConfig.NUM_PARTITIONS_KEY, PubSubConfig.NUM_PARTITIONS_DEFAULT).toInt
+    val requestedPartitions = PubSubConfig.getOption(PubSubConfig.NUM_PARTITIONS_KEY, options, spark)
+      .getOrElse(defaultParallelism.toString).toInt
     val numPartitions = if (requestedPartitions > maxPartitions) {
       logWarning(s"Reducing numPartitions from $requestedPartitions to $maxPartitions to stay within connection quotas (max 2x cores).")
       maxPartitions
@@ -87,9 +89,10 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
     // and flush their local reservoirs for these batch IDs.
     
     
-    val jitterMillis = options.getOrElse(PubSubConfig.JITTER_MS_KEY, PubSubConfig.DEFAULT_JITTER_MS).toInt
-    val format = options.get(PubSubConfig.FORMAT_KEY)
-    val avroSchema = options.get(PubSubConfig.AVRO_SCHEMA_KEY)
+    val jitterMillis = PubSubConfig.getOption(PubSubConfig.JITTER_MS_KEY, options, spark)
+      .getOrElse(PubSubConfig.DEFAULT_JITTER_MS).toInt
+    val format = PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options, spark)
+    val avroSchema = PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options, spark)
 
     (0 until numPartitions).map { i =>
       PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema)

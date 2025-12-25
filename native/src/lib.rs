@@ -207,8 +207,10 @@ mod jni {
                 let ack_ids: Vec<String> = msgs.iter().map(|m| m.ack_id.clone()).collect();
                 {
                     let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                    reservoir.entry(batch_id.clone()).or_insert_with(std::collections::HashMap::new)
-                        .entry(reader.client.subscription_name.clone()).or_insert_with(Vec::new)
+                    let entry = reservoir.entry(batch_id.clone())
+                        .or_insert_with(|| (tokio::time::Instant::now(), std::collections::HashMap::new()));
+                    entry.1.entry(reader.client.subscription_name.clone())
+                        .or_insert_with(Vec::new)
                         .extend(ack_ids);
                 }
 
@@ -287,14 +289,14 @@ mod jni {
                 {
                     let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                     for id in batch_ids {
-                        if let Some(subs) = reservoir.get_mut(&id) {
+                        if let Some((_, subs)) = reservoir.get_mut(&id) {
                             if let Some(ids) = subs.remove(&reader.client.subscription_name) {
                                 to_ack.extend(ids);
                             }
                         }
                     }
                     // Cleanup empty batches
-                    reservoir.retain(|_, subs| !subs.is_empty());
+                    reservoir.retain(|_, (_, subs)| !subs.is_empty());
                 }
 
                 if to_ack.is_empty() { return 1; }
@@ -311,7 +313,7 @@ mod jni {
             crate::safe_jni_call(-1, || {
                 let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                 let mut count = 0;
-                for (_batch, subs) in reservoir.iter() {
+                for (_batch, (_, subs)) in reservoir.iter() {
                     for (_sub, ids) in subs {
                         count += ids.len();
                     }

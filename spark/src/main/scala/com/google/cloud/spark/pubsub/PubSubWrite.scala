@@ -10,22 +10,36 @@ import scala.collection.JavaConverters._
  * Builder for creating a `PubSubWrite` operation.
  */
 class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) extends WriteBuilder {
-  override def build(): Write = new PubSubWrite(schema, options)
+  override def build(): Write = {
+    val spark = org.apache.spark.sql.SparkSession.active
+    // Resolve mandatory/optional options on the Driver
+    val resolvedOptions = Map(
+      PubSubConfig.PROJECT_ID_KEY -> PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(""),
+      PubSubConfig.TOPIC_ID_KEY -> PubSubConfig.getOption(PubSubConfig.TOPIC_ID_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(""),
+      PubSubConfig.BATCH_SIZE_KEY -> PubSubConfig.getOption(PubSubConfig.BATCH_SIZE_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(PubSubConfig.DEFAULT_BATCH_SIZE.toString),
+      PubSubConfig.LINGER_MS_KEY -> PubSubConfig.getOption(PubSubConfig.LINGER_MS_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(PubSubConfig.DEFAULT_LINGER_MS.toString),
+      PubSubConfig.MAX_BATCH_BYTES_KEY -> PubSubConfig.getOption(PubSubConfig.MAX_BATCH_BYTES_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("5242880"),
+      PubSubConfig.FLUSH_TIMEOUT_MS_KEY -> PubSubConfig.getOption(PubSubConfig.FLUSH_TIMEOUT_MS_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(PubSubConfig.DEFAULT_FLUSH_TIMEOUT_MS.toString),
+      PubSubConfig.FORMAT_KEY -> PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("json"),
+      PubSubConfig.AVRO_SCHEMA_KEY -> PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("")
+    )
+    new PubSubWrite(schema, resolvedOptions)
+  }
 }
 
 /**
  * Defines a structural write operation to Pub/Sub.
  */
-class PubSubWrite(schema: StructType, options: CaseInsensitiveStringMap) extends Write {
+class PubSubWrite(schema: StructType, options: Map[String, String]) extends Write {
   override def toBatch: BatchWrite = new PubSubBatchWrite(schema, options)
 }
 
 /**
  * Orchestrates batch writing across executors.
  */
-class PubSubBatchWrite(schema: StructType, options: CaseInsensitiveStringMap) extends BatchWrite {
+class PubSubBatchWrite(schema: StructType, options: Map[String, String]) extends BatchWrite {
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    new PubSubDataWriterFactory(schema, options.asCaseSensitiveMap().asScala.toMap)
+    new PubSubDataWriterFactory(schema, options)
   }
 
   override def commit(messages: Array[WriterCommitMessage]): Unit = {}
@@ -52,8 +66,8 @@ class PubSubDataWriterFactory(schema: StructType, options: Map[String, String]) 
 class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, options: Map[String, String]) 
   extends DataWriter[InternalRow] with org.apache.spark.internal.Logging {
   
-  private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, throw new IllegalArgumentException(s"${PubSubConfig.PROJECT_ID_KEY} is required"))
-  private val topicId = options.getOrElse(PubSubConfig.TOPIC_ID_KEY, throw new IllegalArgumentException(s"${PubSubConfig.TOPIC_ID_KEY} is required"))
+  private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, "")
+  private val topicId = options.getOrElse(PubSubConfig.TOPIC_ID_KEY, "")
   private val batchSize = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
   private val lingerMs = options.getOrElse(PubSubConfig.LINGER_MS_KEY, PubSubConfig.DEFAULT_LINGER_MS.toString).toLong
   private val maxBatchBytes = options.getOrElse(PubSubConfig.MAX_BATCH_BYTES_KEY, "5242880").toLong // 5MB default

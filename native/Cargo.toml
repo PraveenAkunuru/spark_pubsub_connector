@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-arrow = { version = "53.0.0", features = ["ffi", "json"] }
-arrow-schema = { version = "53.0.0", features = ["serde"] }
+arrow = { version = "51.0.0", features = ["ffi", "json"] }
+arrow-schema = { version = "51.0.0", features = ["serde"] }
 tokio = { version = "1.0", features = ["full"] }
 tonic = { version = "0.12", features = ["tls", "tls-roots", "gzip"] }
 prost = "0.13"
