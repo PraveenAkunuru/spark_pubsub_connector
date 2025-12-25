@@ -14,6 +14,8 @@ class ThroughputIntegrationTest extends AnyFunSuite {
       .appName("ThroughputIntegrationTest")
       .master(sys.env.getOrElse("TEST_MASTER", sys.props.getOrElse("spark.master", "local[4]")))
       .config("spark.sql.vectorized.enabled", "true")
+      .config("spark.driver.memory", "2g")
+      .config("spark.executor.memory", "2g")
       .getOrCreate()
 
     import spark.implicits._

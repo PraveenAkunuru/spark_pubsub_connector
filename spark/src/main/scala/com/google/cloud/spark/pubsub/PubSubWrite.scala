@@ -152,7 +152,12 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   }
 
   override def close(): Unit = {
-    writer.close(nativePtr)
+    val res = writer.close(nativePtr)
+    if (res < 0) {
+      logError(s"NativeWriter.close failed with code $res")
+      // We should throw to signal task failure, especially for Flush errors
+      throw new RuntimeException(s"NativeWriter.close failed with code $res")
+    }
     if (root != null) {
       root.close()
     }

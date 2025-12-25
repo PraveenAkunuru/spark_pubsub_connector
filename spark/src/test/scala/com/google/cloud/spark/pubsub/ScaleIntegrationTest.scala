@@ -12,6 +12,8 @@ class ScaleIntegrationTest extends AnyFunSuite {
       .appName("ScaleIntegrationTest")
       .master("local[4]")
       .config("spark.sql.vectorized.enabled", "true")
+      .config("spark.driver.memory", "2g")
+      .config("spark.executor.memory", "2g")
       .getOrCreate()
 
     try {

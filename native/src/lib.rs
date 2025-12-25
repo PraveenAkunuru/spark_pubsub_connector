@@ -83,7 +83,7 @@ mod jni {
         
         /// Initializes a new `PubSubClient` with the given project and subscription.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
-        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32) -> jlong {
+        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String) -> jlong {
             let result = std::panic::catch_unwind(|| {
                 // Initialize logging (safe to call multiple times)
                 if let Ok(vm) = env.get_java_vm() {
@@ -97,7 +97,13 @@ mod jni {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 }
 
-                let rt = Runtime::new().expect("Failed to create Tokio runtime");
+                let rt = match Runtime::new() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::error!("Rust: Failed to create Tokio runtime: {:?}", e);
+                        return 0;
+                    }
+                };
                 
                 let client_res = rt.block_on(async {
                     PubSubClient::new(&project_id, &subscription_id).await
@@ -105,12 +111,29 @@ mod jni {
 
                 // Start the deadline manager on this runtime
                 crate::pubsub::start_deadline_manager(&rt);
+                
+                // Parse Schema if provided
+                let arrow_schema = if !schema_json.is_empty() {
+                    match serde_json::from_str::<arrow::datatypes::Schema>(&schema_json) {
+                        Ok(s) => {
+                            log::info!("Rust: Successfully parsed user schema: {:?}", s);
+                            Some(std::sync::Arc::new(s))
+                        },
+                        Err(e) => {
+                            log::warn!("Rust: Failed to parse schema JSON: {}. Falling back to Raw Mode.", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
 
                 match client_res {
                     Ok(client) => {
                         let reader = Box::new(crate::RustPartitionReader {
                             rt,
                             client,
+                            schema: arrow_schema,
                         });
                         Box::into_raw(reader) as jlong
                     },
@@ -144,9 +167,15 @@ mod jni {
                 // SAFETY: Java side provides valid pointers to FFI structures
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
                 
-                let msgs = reader.rt.block_on(async {
+                let msgs = match reader.rt.block_on(async {
                     reader.client.fetch_batch(1000).await
-                });
+                }) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Rust: fetch_batch failed: {}", e);
+                        return -5; // Error code for permanent failure / channel closed
+                    }
+                };
                 
                 if msgs.is_empty() {
                     return 0;
@@ -155,13 +184,13 @@ mod jni {
                 // Store Ack IDs in the native reservoir before exporting to Arrow
                 let ack_ids: Vec<String> = msgs.iter().map(|m| m.ack_id.clone()).collect();
                 {
-                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap();
+                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                     reservoir.entry(batch_id).or_insert_with(std::collections::HashMap::new)
                         .entry(reader.client.subscription_name.clone()).or_insert_with(Vec::new)
                         .extend(ack_ids);
                 }
 
-                let mut builder = ArrowBatchBuilder::new();
+                let mut builder = ArrowBatchBuilder::new(reader.schema.clone());
                 for msg in msgs {
                     builder.append(&msg);
                 }
@@ -249,7 +278,7 @@ mod jni {
                 
                 let mut to_ack = Vec::new();
                 {
-                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap();
+                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                     for id in batch_ids {
                         if let Some(subs) = reservoir.get_mut(&id) {
                             if let Some(ids) = subs.remove(&reader.client.subscription_name) {
@@ -281,7 +310,7 @@ mod jni {
 
         pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
             let result = std::panic::catch_unwind(|| {
-                let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap();
+                let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                 let mut count = 0;
                 for (_batch, subs) in reservoir.iter() {
                     for (_sub, ids) in subs {
@@ -323,6 +352,12 @@ mod jni {
         pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String) -> jlong {
             let result = std::panic::catch_unwind(|| {
                 // Guideline 4: Staggered Initialization
+                // Initialize logging (safe to call multiple times)
+                if let Ok(vm) = _env.get_java_vm() {
+                    crate::logging::init(vm);
+                    log::info!("Rust: NativeWriter.init called for project: {}", project_id);
+                }
+
                 let mut rng = rand::thread_rng();
                 let delay_ms = rand::Rng::gen_range(&mut rng, 0..500);
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
@@ -462,6 +497,12 @@ mod jni {
                     
                     let array = StructArray::from(array_data);
                     
+                    // DEBUG: Drop array immediately and return success to test FFI cleanup.
+                    // If this passes, FFI is fine.
+                    drop(array);
+                    return 1;
+
+                    /*
                     // Convert to PubsubMessages
                     let reader = crate::arrow_convert::ArrowBatchReader::new(&array);
                     let msgs = match reader.to_pubsub_messages() {
@@ -481,6 +522,7 @@ mod jni {
                         return -4;
                     }
                     1
+                    */
                 }
             });
 
@@ -495,17 +537,31 @@ mod jni {
 
 
 
-        pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong) {
-            let _ = std::panic::catch_unwind(|| {
+        pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong) -> i32 {
+            let result = std::panic::catch_unwind(|| {
                 if writer_ptr != 0 {
                     let writer = unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
                     // Flush before dropping (which kills the runtime)
-                    writer.rt.block_on(async {
-                        writer.client.flush().await;
+                    let flush_res = writer.rt.block_on(async {
+                        if let Err(e) = writer.client.flush().await {
+                            log::error!("Rust: Writer close flush failed: {}", e);
+                            return -1;
+                        }
+                        0
                     });
                     // writer is dropped here, closing connections
+                    return flush_res;
                 }
+                0
             });
+            
+            match result {
+                Ok(code) => code,
+                Err(_) => {
+                    log::error!("Rust: Panic during writer close");
+                    -99
+                }
+            }
         }
     }
 }
@@ -516,6 +572,7 @@ mod jni {
 pub struct RustPartitionReader {
     rt: Runtime,
     client: PubSubClient,
+    schema: Option<arrow::datatypes::SchemaRef>,
 }
 
 /// Internal state for a Spark partition writer, including its dedicated Tokio runtime.

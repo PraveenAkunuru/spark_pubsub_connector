@@ -8,7 +8,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.vectorized.{ColumnarBatch, ArrowColumnVector}
 import scala.collection.JavaConverters._
 
-import org.apache.hadoop.fs.Path
+
 import org.apache.spark.sql.SparkSession
 
 /**
@@ -144,10 +144,19 @@ class PubSubPartitionReaderFactory(schema: StructType) extends PartitionReaderFa
 class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType) 
   extends PartitionReader[InternalRow] with org.apache.spark.internal.Logging {
   
+  import org.apache.spark.sql.util.PubSubArrowUtils
   private val reader = new NativeReader()
   logInfo(s"PubSubPartitionReader created for ${partition.subscriptionId}")
   
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis)
+  private val schemaJson = try {
+     PubSubArrowUtils.toArrowSchema(schema)
+  } catch {
+     case e: Exception => 
+       logWarning(s"Failed to convert schema to Arrow JSON: ${e.getMessage}. Using raw mode.")
+       ""
+  }
+
+  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis, schemaJson)
   if (nativePtr == 0) {
     throw new RuntimeException("Failed to initialize native Pub/Sub client.")
   }
@@ -186,7 +195,7 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
     try {
       val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
       
-      if (result != 0) {
+      if (result > 0) {
         val root = org.apache.arrow.c.Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
         currentVectorSchemaRoot = root
         
@@ -211,10 +220,14 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
         
         currentBatch = rows.toIterator.asJava
         currentBatch.hasNext
-      } else {
+      } else if (result == 0) {
         arrowArray.close()
         arrowSchema.close()
         false
+      } else {
+        arrowArray.close()
+        arrowSchema.close()
+        throw new RuntimeException(s"NativeReader.getNextBatch failed with code $result")
       }
     } catch {
       case e: Exception =>
@@ -245,8 +258,14 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
 class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: StructType)
   extends PartitionReader[ColumnarBatch] with org.apache.spark.internal.Logging {
 
+  import org.apache.spark.sql.util.PubSubArrowUtils
   private val reader = new NativeReader()
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis)
+  private val schemaJson = try {
+     PubSubArrowUtils.toArrowSchema(schema)
+  } catch {
+     case _: Exception => ""
+  }
+  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis, schemaJson)
   private val allocator = new org.apache.arrow.memory.RootAllocator()
   private var currentBatch: ColumnarBatch = _
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
@@ -270,7 +289,7 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
     
     try {
       val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
-      if (result != 0) {
+      if (result > 0) {
         val root = org.apache.arrow.c.Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
         currentVectorSchemaRoot = root
         
@@ -279,11 +298,15 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
         }
         currentBatch = new ColumnarBatch(columnarVectors.toArray, root.getRowCount)
         true
-      } else {
+      } else if (result == 0) {
         arrowArray.close()
         arrowSchema.close()
         isExhausted = true
         false
+      } else {
+        arrowArray.close()
+        arrowSchema.close()
+        throw new RuntimeException(s"NativeReader.getNextBatch failed with code $result")
       }
     } catch {
       case e: Exception =>

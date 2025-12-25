@@ -38,9 +38,16 @@ pub struct PubSubClient {
 
 impl PubSubClient {
     /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
+    /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
     pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         log::info!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
         let (channel, header_val) = create_channel_and_header().await?;
+
+        let full_sub_name = if subscription_id.contains('/') {
+            subscription_id.to_string()
+        } else {
+            format!("projects/{}/subscriptions/{}", project_id, subscription_id)
+        };
 
         let mut client = SubscriberClient::with_interceptor(channel, move |mut req: Request<()>| {
             if let Some(val) = &header_val {
@@ -49,14 +56,22 @@ impl PubSubClient {
             Ok(req)
         });
 
+        // 1. Synchronous Validation: Check if subscription exists
+        let check_req = google_cloud_googleapis::pubsub::v1::GetSubscriptionRequest {
+            subscription: full_sub_name.clone(),
+        };
+        match client.get_subscription(Request::new(check_req)).await {
+            Ok(_) => log::info!("Rust: Subscription validated: {}", full_sub_name),
+            Err(e) => {
+                log::error!("Rust: Subscription validation failed: {:?}", e);
+                return Err(Box::new(e));
+            }
+        }
+
         // 3. Start StreamingPull
         let (tx, rx) = mpsc::channel(1000);
         
-        let full_sub_name = if subscription_id.contains('/') {
-            subscription_id.to_string()
-        } else {
-            format!("projects/{}/subscriptions/{}", project_id, subscription_id)
-        };
+        // We moved full_sub_name definition up
 
         let (ext_tx, mut ext_rx) = tokio::sync::mpsc::channel::<StreamingPullRequest>(100);
         let sub_name_for_task = full_sub_name.clone();
@@ -95,20 +110,13 @@ impl PubSubClient {
                         backoff_secs = 1;
                         let mut stream = response.into_inner();
                         
-                        // Concurrent loop to read from external RX and write to gRPC TX,
-                        // while reading from gRPC stream and writing to internal TX.
+                        // Buffer for messages that we pulled but haven't pushed to Spark yet due to backpressure
+                        let mut pending_messages: std::collections::VecDeque<ReceivedMessage> = std::collections::VecDeque::new();
+
                         loop {
+                            let tx_full = pending_messages.len() >= 2000;
+
                             tokio::select! {
-                                resp_res = stream.message() => {
-                                    match resp_res {
-                                        Ok(Some(resp)) => {
-                                            for recv_msg in resp.received_messages {
-                                                if tx.send(recv_msg).await.is_err() { return; }
-                                            }
-                                        }
-                                        _ => break, // Stream closed or error
-                                    }
-                                }
                                 ext_opt = ext_rx.recv() => {
                                     match ext_opt {
                                         Some(ext_req) => {
@@ -116,7 +124,31 @@ impl PubSubClient {
                                                 break;
                                             }
                                         }
-                                        None => return, // External channel closed
+                                        None => return, 
+                                    }
+                                }
+                                resp_res = stream.message(), if !tx_full => {
+                                    match resp_res {
+                                        Ok(Some(resp)) => {
+                                            for msg in resp.received_messages {
+                                                pending_messages.push_back(msg);
+                                            }
+                                        }
+                                        Ok(None) => break, 
+                                        Err(e) => {
+                                            log::error!("Rust: gRPC Stream error: {:?}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                                res = tx.reserve(), if !pending_messages.is_empty() => {
+                                    match res {
+                                        Ok(permit) => {
+                                            if let Some(msg) = pending_messages.pop_front() {
+                                                permit.send(msg);
+                                            }
+                                        }
+                                        Err(_) => return,
                                     }
                                 }
                             }
@@ -140,8 +172,8 @@ impl PubSubClient {
     }
 
     /// Drains up to `batch_size` messages from the internal buffer.
-    /// This is non-blocking and will return early if the buffer is empty or the timeout is reached.
-    pub async fn fetch_batch(&mut self, batch_size: usize) -> Vec<ReceivedMessage> {
+    /// Returns an error if the receiver channel is closed (background task died).
+    pub async fn fetch_batch(&mut self, batch_size: usize) -> Result<Vec<ReceivedMessage>, String> {
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size {
              match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
@@ -150,13 +182,16 @@ impl PubSubClient {
                      batch.push(msg);
                  },
                  Ok(None) => {
-                     eprintln!("Rust: Receiver channel closed");
-                     break;
+                     log::error!("Rust: Receiver channel closed (background task died).");
+                     if batch.is_empty() {
+                         return Err("Background task died".to_string());
+                     }
+                     break; // Return functionality partial batch
                  },
                  Err(_) => break, // timeout
              }
         }
-        batch
+        Ok(batch)
     }
     
     /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
@@ -205,7 +240,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
             tokio::time::sleep(Duration::from_secs(5)).await;
             
             let snapshot: Vec<(String, Vec<String>)> = {
-                let reservoir = ACK_RESERVOIR.lock().unwrap();
+                let reservoir = ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                 let mut all = Vec::new();
                 for (_batch_id, subs) in reservoir.iter() {
                     for (sub, ids) in subs {
@@ -253,7 +288,7 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     
     // Check pool first
     let channel = {
-        let pool = CONNECTION_POOL.lock().unwrap();
+        let pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
         pool.get(&endpoint).cloned()
     };
 
@@ -264,7 +299,7 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
         let ch = Channel::from_shared(endpoint.clone())?
             .connect()
             .await?;
-        let mut pool = CONNECTION_POOL.lock().unwrap();
+        let mut pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
         pool.insert(endpoint, ch.clone());
         ch
     };
@@ -336,6 +371,12 @@ impl PublisherClient {
                             match client.publish(request).await {
                                 Ok(_) => break, // Success
                                 Err(e) => {
+                                    let code = e.code();
+                                    if code == tonic::Code::NotFound || code == tonic::Code::PermissionDenied || code == tonic::Code::InvalidArgument {
+                                        log::error!("Rust: Fatal Publish Error: {:?}. Stopping background task.", e);
+                                        return; // Exit the background task immediately (closes rx)
+                                    }
+
                                     log::warn!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
                                     tokio::time::sleep(tokio::time::Duration::from_millis(backoff_millis)).await;
                                     backoff_millis = std::cmp::min(backoff_millis * 2, max_backoff);
@@ -367,14 +408,23 @@ impl PublisherClient {
     }
     
     /// Flushes all pending messages by sending a Flush command and waiting for it to be processed.
-    pub async fn flush(&self) {
+    pub async fn flush(&self) -> Result<(), String> {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {
             log::warn!("Rust: Failed to send flush command: {:?}", e);
-            return;
+            return Err("Failed to send flush command (background task died?)".to_string());
         }
-        if let Err(e) = ack_rx.await {
-            log::error!("Rust: Flush wait failed (channel closed): {:?}", e);
+        
+        match tokio::time::timeout(Duration::from_secs(30), ack_rx).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => {
+                log::error!("Rust: Flush wait failed (channel closed): {:?}", e);
+                Err("Flush channel closed (background task died?)".to_string())
+            },
+            Err(_) => {
+                log::error!("Rust: Flush timed out after 30s");
+                Err("Flush timed out".to_string())
+            }
         }
     }
 }
