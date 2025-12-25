@@ -137,17 +137,17 @@ cd spark
 "$JAVA_HOME/bin/java" -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.AckIntegrationTest"
 
 # 3. Verify Write Path (Sink)
-./run_write_verification.sh
+scripts/run_write_verification.sh
 
 # 4. Measure Write Scalability & Resilience
-./run_write_scaling_test.sh
+scripts/run_write_scaling_test.sh
 # Runs a 2 -> 10 -> 2 executor scaling scenario with fault injection tolerance.
 
 # 5. Run Extended Throughput Tests (Read)
-./run_custom_throughput.sh <payload_bytes> <msg_count>
+scripts/run_custom_throughput.sh <payload_bytes> <msg_count>
 
 # 6. Run Dynamic Scaling Test (Read)
-./run_dynamic_scaling_test.sh
+scripts/run_dynamic_scaling_test.sh
 ```
 
 ## 📊 Benchmark

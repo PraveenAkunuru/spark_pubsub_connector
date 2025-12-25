@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 PROJECT_ID="scale-test-project"
 TOPIC_ID="scale-topic"
@@ -45,7 +46,7 @@ done
 # This does 10,000 messages (100 batches of 100)
 
 echo "Running Spark Scale Test..."
-cd spark
+cd ../spark
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
 

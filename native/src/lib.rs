@@ -10,6 +10,7 @@
 
 use robusta_jni::bridge;
 
+mod logging;
 mod pubsub;
 mod arrow_convert;
 
@@ -82,9 +83,14 @@ mod jni {
         
         /// Initializes a new `PubSubClient` with the given project and subscription.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
-        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32) -> jlong {
+        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32) -> jlong {
             let result = std::panic::catch_unwind(|| {
-                // Guideline 4: Staggered Initialization
+                // Initialize logging (safe to call multiple times)
+                if let Ok(vm) = env.get_java_vm() {
+                    crate::logging::init(vm);
+                    log::info!("Rust: NativeReader.init called for project: {}", project_id);
+                }
+
                 if jitter_millis > 0 {
                     let mut rng = rand::thread_rng();
                     let delay_ms = rand::Rng::gen_range(&mut rng, 0..(jitter_millis as u64));
@@ -109,7 +115,7 @@ mod jni {
                         Box::into_raw(reader) as jlong
                     },
                     Err(e) => {
-                        eprintln!("Rust: Failed to create Pub/Sub client: {:?}", e);
+                        log::error!("Rust: Failed to create Pub/Sub client: {:?}", e);
                         0
                     }
                 }
@@ -118,7 +124,7 @@ mod jni {
             match result {
                 Ok(ptr) => ptr,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeReader.init");
+                    log::error!("Rust: Panic occurred during NativeReader.init");
                     0
                 }
             }
@@ -165,7 +171,7 @@ mod jni {
                 let batch = match arrow::record_batch::RecordBatch::try_new(schema, arrays) {
                     Ok(b) => b,
                     Err(e) => {
-                        eprintln!("Rust: Failed to create RecordBatch: {:?}", e);
+                        log::error!("Rust: Failed to create RecordBatch: {:?}", e);
                         return -2;
                     }
                 };
@@ -175,7 +181,7 @@ mod jni {
                 let (array_val, schema_val) = match arrow::ffi::to_ffi(&struct_array.into_data()) {
                     Ok(ffi) => ffi,
                     Err(e) => {
-                        eprintln!("Rust: Failed to export to FFI: {:?}", e);
+                        log::error!("Rust: Failed to export to FFI: {:?}", e);
                         return -3;
                     }
                 };
@@ -196,7 +202,7 @@ mod jni {
             match result {
                 Ok(res) => res,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeReader.getNextBatch");
+                    log::error!("Rust: Panic occurred during NativeReader.getNextBatch");
                     -100
                 }
             }
@@ -220,7 +226,7 @@ mod jni {
                 match res {
                     Ok(_) => 1,
                     Err(e) => {
-                        eprintln!("Rust: Failed to acknowledge batch: {:?}", e);
+                        log::error!("Rust: Failed to acknowledge batch: {:?}", e);
                         0
                     }
                 }
@@ -229,7 +235,7 @@ mod jni {
             match result {
                 Ok(res) => res,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeReader.acknowledge");
+                    log::error!("Rust: Panic occurred during NativeReader.acknowledge");
                     -100
                 }
             }
@@ -267,7 +273,7 @@ mod jni {
             match result {
                 Ok(res) => res,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeReader.ackCommitted");
+                    log::error!("Rust: Panic occurred during NativeReader.ackCommitted");
                     -100
                 }
             }
@@ -336,7 +342,7 @@ mod jni {
                         Box::into_raw(writer) as jlong
                     },
                     Err(e) => {
-                        eprintln!("Rust: Failed to define publisher: {:?}", e);
+                        log::error!("Rust: Failed to define publisher: {:?}", e);
                         0
                     }
                 }
@@ -345,7 +351,7 @@ mod jni {
             match result {
                 Ok(ptr) => ptr,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeWriter.init");
+                    log::error!("Rust: Panic occurred during NativeWriter.init");
                     0
                 }
             }
@@ -374,7 +380,7 @@ mod jni {
                     
                     if schema_mirror.n_children > 0 {
                         if schema_mirror.children.is_null() {
-                            eprintln!("Rust: FFI Error - Schema n_children is {} but children pointer is NULL", schema_mirror.n_children);
+                            log::error!("Rust: FFI Error - Schema n_children is {} but children pointer is NULL", schema_mirror.n_children);
                             // If we return here, we haven't called std::ptr::read(), so we haven't taken ownership "in Rust terms".
                             // However, the caller (Java/Spark) expects us to take ownership.
                             // If we don't, Spark might double free or leak?
@@ -410,7 +416,7 @@ mod jni {
                     let array_data = match arrow::ffi::from_ffi(array_val_raw, &schema_val_raw) {
                         Ok(data) => data,
                         Err(e) => {
-                            eprintln!("Rust: Failed to import Arrow array from FFI: {:?}", e);
+                            log::error!("Rust: Failed to import Arrow array from FFI: {:?}", e);
                             // We own array_val_raw and schema_val_raw. We must drop/release them.
                             // Schema we still own. Array was moved into from_ffi? No, only matching success? 
                             // `from_ffi` takes ownership of `array`. If it fails, does it drop `array`?
@@ -461,7 +467,7 @@ mod jni {
                     let msgs = match reader.to_pubsub_messages() {
                          Ok(m) => m,
                          Err(e) => {
-                             eprintln!("Rust: Failed to convert batch to PubsubMessages: {:?}", e);
+                             log::error!("Rust: Failed to convert batch to PubsubMessages: {:?}", e);
                              return -3;
                          }
                     };
@@ -471,7 +477,7 @@ mod jni {
                     });
                     
                     if let Err(e) = res {
-                        eprintln!("Rust: Failed to publish batch: {:?}", e);
+                        log::error!("Rust: Failed to publish batch: {:?}", e);
                         return -4;
                     }
                     1
@@ -481,7 +487,7 @@ mod jni {
             match result {
                 Ok(res) => res,
                 Err(_) => {
-                    eprintln!("Rust: Panic occurred during NativeWriter.writeBatch");
+                    log::error!("Rust: Panic occurred during NativeWriter.writeBatch");
                     -100
                 }
             }

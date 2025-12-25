@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 EMULATOR_PORT=8085
 PROJECT_ID="spark-test-project"
@@ -73,7 +74,7 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
   --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
   --add-opens=java.base/sun.util.logging=ALL-UNNAMED"
 
-cd spark
+cd ../spark
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
     -jar sbt-launch.jar spark35/clean spark35/update spark35/test

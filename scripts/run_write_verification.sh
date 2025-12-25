@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 PROJECT_ID="spark-test-project"
 TOPIC_ID="test-topic"
@@ -31,7 +32,7 @@ curl -s -X PUT "http://localhost:8089/v1/projects/${PROJECT_ID}/subscriptions/${
   -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
 
 echo "Running PubSubWriteIntegrationTest..."
-cd spark
+cd ../spark
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 # Export Env vars if needed, though these tests mostly use hardcoded values or System properties.
 # WriteTest uses "spark-test-project", "test-topic" (Hardcoded).

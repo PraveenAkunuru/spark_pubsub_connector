@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 # Wraps run_custom_throughput.sh but overrides SPARK_MASTER for each run.
 # Since run_custom_throughput.sh calls sbt/spark directly, we need to modify it or ThroughputIntegrationTest.scala to use SPARK_MASTER env var.

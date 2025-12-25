@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 echo "==================================================="
 echo "Starting Write Scalability Test (2 -> 10 -> 2)"

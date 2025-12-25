@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 PROJECT_ID="throughput-test-project"
 TOPIC_ID="throughput-topic"
@@ -77,7 +78,7 @@ for b in $(seq 1 ${NUM_BATCHES}); do
 done
 
 echo "Running Spark Test..."
-cd spark
+cd ../spark
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
 

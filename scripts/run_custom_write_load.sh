@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 # Usage: ./run_custom_write_load.sh <MSG_COUNT>
 MSG_COUNT=${1:-10000}
@@ -48,7 +49,7 @@ export TEST_MASTER="${TEST_MASTER:-local[4]}"
 
 echo "Starting Write Scalability Verification (Threads: ${TEST_MASTER}, Count: ${MSG_COUNT})..."
 
-cd spark
+cd ../spark
 # We use sbt to run the test
 # We run in background to allow trap to catch signals
 "$JAVA_HOME/bin/java" -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.WriteScaleIntegrationTest" &

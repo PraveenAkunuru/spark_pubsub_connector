@@ -39,7 +39,7 @@ pub struct PubSubClient {
 impl PubSubClient {
     /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
     pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        eprintln!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
+        log::info!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
         let (channel, header_val) = create_channel_and_header().await?;
 
         let mut client = SubscriberClient::with_interceptor(channel, move |mut req: Request<()>| {
@@ -62,7 +62,7 @@ impl PubSubClient {
         let sub_name_for_task = full_sub_name.clone();
         
         tokio::spawn(async move {
-            eprintln!("Rust: Background StreamingPull task started");
+            log::info!("Rust: Background StreamingPull task started");
             let mut backoff_secs = 1;
             
             loop {
@@ -81,7 +81,7 @@ impl PubSubClient {
                 };
 
                 if let Err(e) = grpc_tx.send(init_req).await {
-                     eprintln!("Rust: Failed to send init request to gRPC stream: {:?}", e);
+                     log::error!("Rust: Failed to send init request to gRPC stream: {:?}", e);
                      tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                      backoff_secs = std::cmp::min(backoff_secs * 2, 60);
                      continue;
@@ -91,7 +91,7 @@ impl PubSubClient {
                 
                 match response_stream {
                     Ok(response) => {
-                        eprintln!("Rust: StreamingPull established. Resetting backoff.");
+                        log::info!("Rust: StreamingPull established. Resetting backoff.");
                         backoff_secs = 1;
                         let mut stream = response.into_inner();
                         
@@ -121,10 +121,10 @@ impl PubSubClient {
                                 }
                             }
                         }
-                        eprintln!("Rust: StreamingPull stream ended. Retrying...");
+                        log::warn!("Rust: StreamingPull stream ended. Retrying...");
                     },
                     Err(e) => {
-                        eprintln!("Rust: StreamingPull failed: {:?}. Retrying in {}s", e, backoff_secs);
+                        log::warn!("Rust: StreamingPull failed: {:?}. Retrying in {}s", e, backoff_secs);
                         tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                         backoff_secs = std::cmp::min(backoff_secs * 2, 60);
                     }
@@ -161,7 +161,7 @@ impl PubSubClient {
     
     /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
     pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        eprintln!("Rust: Sending ack request for {} ids", ack_ids.len());
+        log::debug!("Rust: Sending ack request for {} ids", ack_ids.len());
         if ack_ids.is_empty() {
             return Ok(());
         }
@@ -171,7 +171,7 @@ impl PubSubClient {
         };
         // We use the sender to send this request into the stream
         self.sender.send(req).await.map_err(|e| format!("Failed to send Ack request: {}", e))?;
-        eprintln!("Rust: Ack request sent to stream");
+        log::debug!("Rust: Ack request sent to stream");
         Ok(())
     }
 }
@@ -199,7 +199,7 @@ pub(crate) static ACK_RESERVOIR: Lazy<Mutex<AckReservoirMap>> = Lazy::new(|| {
 /// Starts the background deadline manager.
 /// This function should be called once per Runtime to ensure liveness.
 pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
-    eprintln!("Rust: Starting background deadline manager for runtime");
+    log::info!("Rust: Starting background deadline manager for runtime");
     rt.spawn(async {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -221,7 +221,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
                 let (channel, header_val) = match create_channel_and_header().await {
                     Ok(res) => res,
                     Err(e) => {
-                        eprintln!("Rust DeadlineMgr: Failed to get channel: {:?}", e);
+                        log::warn!("Rust DeadlineMgr: Failed to get channel: {:?}", e);
                         continue;
                     }
                 };
@@ -238,7 +238,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
                 }
                 
                 if let Err(e) = client.modify_ack_deadline(request).await {
-                    eprintln!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
+                    log::warn!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
                 }
             }
         }
@@ -260,7 +260,7 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     let channel = if let Some(ch) = channel {
         ch
     } else {
-        eprintln!("Rust: Creating new gRPC channel for {}", endpoint);
+        log::debug!("Rust: Creating new gRPC channel for {}", endpoint);
         let ch = Channel::from_shared(endpoint.clone())?
             .connect()
             .await?;
@@ -336,7 +336,7 @@ impl PublisherClient {
                             match client.publish(request).await {
                                 Ok(_) => break, // Success
                                 Err(e) => {
-                                    eprintln!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
+                                    log::warn!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
                                     tokio::time::sleep(tokio::time::Duration::from_millis(backoff_millis)).await;
                                     backoff_millis = std::cmp::min(backoff_millis * 2, max_backoff);
                                 }
@@ -347,11 +347,11 @@ impl PublisherClient {
                         // Because we process commands sequentially in this loop,
                         // by the time we reach here, all previous Publish commands are finished.
                         let _ = ack_tx.send(());
-                        eprintln!("Rust: Flush completed.");
+                        log::info!("Rust: Flush completed.");
                     }
                 }
             }
-            eprintln!("Rust: Publisher background task ended");
+            log::info!("Rust: Publisher background task ended");
         });
 
         Ok(Self { tx })
@@ -370,11 +370,11 @@ impl PublisherClient {
     pub async fn flush(&self) {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {
-            eprintln!("Rust: Failed to send flush command: {:?}", e);
+            log::warn!("Rust: Failed to send flush command: {:?}", e);
             return;
         }
         if let Err(e) = ack_rx.await {
-            eprintln!("Rust: Flush wait failed (channel closed): {:?}", e);
+            log::error!("Rust: Flush wait failed (channel closed): {:?}", e);
         }
     }
 }
