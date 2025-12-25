@@ -1,88 +1,88 @@
-# Development & Operations Guide
+# Development Guide
 
-This guide covers everything you need to build, test, configure, and troubleshoot the Spark Pub/Sub Connector.
+This guide describes how to build, test, and benchmark the Spark Pub/Sub Connector.
 
 ---
 
 ## 1. Prerequisites
 
-- **Java**: JDK 17 or 21.
+- **Java**: JDK 17 or 21 (Required for Spark 3.5+).
 - **Rust**: Stable toolchain (1.75+).
-- **Scala**: 2.12.18 / 2.13.13 (Managed by sbt).
-- **Apache Spark**: 3.3, 3.5, or 4.0.
-- **Google Cloud SDK**: For authentication (ADC) and Pub/Sub Emulator.
+- **Scala**: 2.12.18 (Spark 3.5) or 2.13.13 (Spark 4.0).
+- **Google Cloud SDK**: For local authentication and Emulator.
 
 ---
 
-## 2. Building the Connector
+## 2. Build Instructions
 
-### Step 1: Build Native Layer (Rust)
+The build is a two-step process: compiling the Native Rust layer, then packaging the Spark JAR.
+
+### Step 1: Build Native Layer
 ```bash
-cd native && cargo build --release
+cd native
+cargo build --release
 ```
-The resulting library will be located in `native/target/release/libnative_pubsub_connector.so`.
+**Artifact**: `native/target/release/libnative_pubsub_connector.so`
 
-### Step 2: Build Spark Layer (Scala)
+### Step 2: Build Spark JAR
+The SBT build will automatically include the native library if correct paths are set, but for distribution, we manually verify placement.
+
 ```bash
-cd spark && java -jar sbt-launch.jar "spark35/package"
+cd spark
+# For Spark 3.5 (Scala 2.12)
+java -jar sbt-launch.jar "spark35/package"
 ```
-Substitute `spark35` with `spark33` or `spark40` as needed.
+**Artifact**: `spark/spark35/target/scala-2.12/spark-pubsub-connector-3-5_2.12-x.x.x.jar`
 
 ---
 
-## 3. Configuration Reference
+## 3. Testing Strategies
 
-Options are passed via `.option("key", "value")` in Spark.
+### 3.1. Rust Unit Tests
+Runs standard Rust tests for logic and serialization.
+```bash
+cd native
+cargo test
+```
 
-| Option | Description | Default |
-| :--- | :--- | :--- |
-| `projectId` | GCP Project ID. | (Required) |
-| `subscriptionId` | Pub/Sub Subscription ID (for Reads). | (Required for Read) |
-| `topicId` | Pub/Sub Topic ID (for Writes). | (Required for Write) |
-| `format` | Data format: `raw` (binary), `json`, or `avro`. | `raw` |
-| `avroSchema` | Optional Avro schema string for structured parsing. | - |
-| `batchSize` | Messages to buffer before flush. | `1000` |
-| `maxBatchBytes` | Max batch size in bytes before flush (Sink). | `5000000` (5MB) |
-| `lingerMs` | Max wait time before flushing partial batches (Sink). | `1000` (1s) |
-| `numPartitions` | Number of parallel read partitions. | `1` |
-| `jitterMs` | Random delay during startup to prevent API spikes. | `500` |
+### 3.2. Scala Unit Tests
+Runs Spark-side verifications.
+```bash
+cd spark
+java -jar sbt-launch.jar "spark35/test"
+```
 
----
-
-## 4. Testing & Verification
-
-### 4.1. Unit & Linting
-- **Rust**: `cd native && cargo clippy && cargo test`
-- **Scala**: `cd spark && java -jar sbt-launch.jar compile`
-
-### 4.2. Integration Testing (Emulator)
-The connector supports the Google Cloud Pub/Sub Emulator for local development.
+### 3.3. Integration Testing (Emulator)
+You can run integration tests without hitting real Cloud Pub/Sub using the emulator.
 
 1. **Start Emulator**:
    ```bash
    gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
    ```
-2. **Run Tests**:
+2. **Run Tests with Env Var**:
    ```bash
-   cd spark && export PUBSUB_EMULATOR_HOST=localhost:8085
+   export PUBSUB_EMULATOR_HOST=localhost:8085
+   cd spark
    java -jar sbt-launch.jar "spark35/test"
    ```
 
-### 4.3. Throughput Benchmarking
-Use the provided script in the `scripts/` directory:
+---
+
+## 4. Benchmarking
+
+Use the provided scripts in `scripts/` to measure throughput.
+
+### Custom Throughput Test
+Generates synthetic data to measure write performance.
 ```bash
-./scripts/run_custom_throughput.sh <message_size_kb> <message_count>
+./scripts/run_custom_throughput.sh <msg_size_kb> <num_messages>
+# Example: 1KB messages, 1 Million count
+./scripts/run_custom_throughput.sh 1 1000000
 ```
 
 ---
 
-## 5. Troubleshooting
-
-### Log Locations
-- **Rust Logs**: Found in Executor `stderr`. Look for `Rust:` prefix.
-- **Spark Logs**: Found in standard Spark `stdout` / `log4j` logs.
-
-### Common Issues
-- **UnsatisfiedLinkError**: Ensure the native library is built and `java.library.path` is set correctly, or the library is included in the JAR resources.
-- **Thundering Herd**: If many executors fail with 429/ResourceExhausted at startup, increase the `jitterMs` setting.
-- **Async Flush Timeout**: If the writer hangs during shutdown, check the background publisher logs in `stderr` for persistent gRPC errors.
+## 5. Contributing
+- **Linting**: Run `cargo clippy` and `sbt scalastyle` before committing.
+- **Formatting**: Use `cargo fmt`.
+- **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md) for design principles.

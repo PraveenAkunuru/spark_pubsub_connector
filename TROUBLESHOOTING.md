@@ -1,34 +1,28 @@
-# Troubleshooting & Error Codes
+# Troubleshooting & Operations Guide
 
-This guide helps diagnose common issues and provides a "Rosetta Stone" for native error codes.
+This document is the definitive guide for diagnosing issues, configuring the environment, and operating the Spark Pub/Sub Connector in production.
+
+---
 
 ## 🧭 Configuration Precedence
 
 The connector resolves settings in the following order:
-1.  **Explicit `.option()`**: Values passed directly in the Spark code.
-2.  **Global `--conf spark.pubsub.<key>`**: Useful for cluster-wide settings (e.g., `projectId`, `numPartitions`).
+1.  **Explicit `.option()`**: Values passed directly in the code (highest priority).
+    - `subscriptionId`: **Required** for reads.
+    - `topicId`: **Required** for writes.
+2.  **Global `--conf spark.pubsub.<key>`**: Cluster-wide defaults.
+    - `spark.pubsub.projectId`: Useful for multi-job clusters.
+    - `spark.pubsub.numPartitions`: Defaults to cluster parallelism if unset.
 3.  **Smart Defaults**:
-    - `projectId`: Inferred from `ServiceOptions` (GCP environment) or `GOOGLE_CLOUD_PROJECT`.
-    - `numPartitions`: Automatically set to match the cluster's default parallelism.
+    - `projectId`: Automatically inferred from GCP environment (metadata server) or `GOOGLE_CLOUD_PROJECT` env var.
 
-## 🪨 Error Code Rosetta Stone (Native Layer)
-
-If a Spark task fails with a negative exit code in the logs, use this table to identify the root cause:
-
-| Code | Label | Meaning & Recommended Action |
-| :--- | :--- | :--- |
-| **-1** | `INVALID_PTR` | Null pointer passed to Rust. Restart the job; if persistent, check native memory logs. |
-| **-2** | `ARROW_ERR` | Failed to create an Arrow `RecordBatch`. Likely a schema mismatch between Spark and the data. |
-| **-3** | `FFI_ERR` | Memory handover failure via JNI. Verify `arrow-rs` version matches the JAR's Arrow version. |
-| **-5** | `CONN_LOST` | The background Rust task died. Check network connectivity or GCP IAM permissions. |
-| **-20** | `LAYOUT_MISMATCH`| Memory layout validation failed. Ensure the `.so`/`.dylib` matches the JAR version exactly. |
-| **-100** | `NATIVE_PANIC` | A logic error occurred in Rust. Check the `stderr` for a Rust backtrace and log a bug. |
+---
 
 ## 🛠️ Mandatory JVM Flags (Java 17+)
 
-Apache Spark 3.5+ typically runs on Java 17. Because this connector uses the **Arrow C Data Interface** and **JNI**, you must "open" specific Java modules to the connector.
+Apache Spark 3.5+ on Dataproc 2.2+ runs on Java 17. Because this connector uses the **Arrow C Data Interface** and **JNI**, you **must** "open" specific internal Java modules to allow native access.
 
-Add these to your `spark-submit` command:
+**Add these flags to your `spark-submit` command or `spark-defaults.conf`:**
 
 ```bash
 --conf "spark.driver.extraJavaOptions=\
@@ -43,18 +37,62 @@ Add these to your `spark-submit` command:
   --add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
 ```
 
-## 🔍 Common Issues
+**Symptoms of missing flags:**
+- `java.lang.reflect.InaccessibleObjectException`
+- `java.lang.IllegalAccessError` accessing `DirectBuffer`
 
-### 1. `UnsatisfiedLinkError`
-*   **Cause**: The JVM cannot find `libnative_pubsub_connector.so` (Linux) or `.dylib` (macOS).
-*   **Fix**: 
-    - Ensure you ran `cargo build --release`.
-    - Check that the library is either in `java.library.path` or bundled in the JAR resources under the correct platform folder (e.g., `linux-x86-64`).
+---
 
-### 2. `InaccessibleObjectException`
-*   **Cause**: Missing `--add-opens` flags on Java 17+.
-*   **Fix**: Add the flags listed in the section above.
+## ☁️ Production Operations (Dataproc / Kubernetes)
 
-### 3. High Memory Usage (OOM)
-*   **Cause**: Usually caused by orphaned native batches if `close()` isn't called.
-*   **Fix**: Ensure your Spark job isn't suppressing task cleanup. The connector now includes a 30-minute TTL safety net in the native reservoir to automatically purge abandoned data.
+### 1. TLS & Certificate Authorities
+The native Rust layer uses `tonic` (gRPC) which requires access to system root certificates.
+- **Issue**: On some minimal images (like Dataproc's Debian 12), the default certificate discovery might fail with `UnknownIssuer`.
+- **Solution**: The connector explicitly checks for `/etc/ssl/certs/ca-certificates.crt`. Ensure your container/image has the `ca-certificates` package installed.
+
+### 2. Authentication & IAM
+- **Scopes**: The connector requests `https://www.googleapis.com/auth/cloud-platform` and `https://www.googleapis.com/auth/pubsub`.
+- **Service Account**: Verify the VM Service Account has:
+    - `roles/pubsub.viewer` (to check subscription existence)
+    - `roles/pubsub.subscriber` (to read messages)
+    - `roles/pubsub.publisher` (to write messages)
+- **Token Issue (Double-Bearer)**: If you see `ACCESS_TOKEN_TYPE_UNSUPPORTED`, it means the `Authorization` header was malformed. The connector now automatically handles tokens whether or not they include the "Bearer " prefix.
+
+### 3. Native Library Loading
+- **Linux**: Expects `libnative_pubsub_connector.so`.
+- **macOS**: Expects `libnative_pubsub_connector.dylib`.
+- The library is bundled in the JAR under `/resources/linux-x86-64/` (or `darwin-aarch64`).
+- **Debug**: If you see `UnsatisfiedLinkError`, verify the JAR was built with the native library included (`sbt assembly` or `sbt package` after `cargo build`).
+
+---
+
+## 🪨 Native Error Codes
+
+If the connector fails at the JNI layer, it returns a negative integer code.
+
+| Code | Label | Meaning & Action |
+| :--- | :--- | :--- |
+| **-1** | `INVALID_PTR` | Null pointer passed to Rust. Restart the Spark Task. |
+| **-2** | `ARROW_ERR` | Failed to create Arrow Batch. Check schema compatibility. |
+| **-3** | `FFI_ERR` | C Data Interface failure. Verify `arrow-rs` vs Spark Arrow version match. |
+| **-5** | `CONN_LOST` | Background gRPC task died. Check network/IAM. |
+| **-20** | `LAYOUT_MISMATCH`| ABI mismatch. Recompile native lib against correct Spark version. |
+| **-100** | `NATIVE_PANIC` | Panic caught in Rust. Check `stderr` / driver logs for backtrace. |
+
+---
+
+## 🔍 Common Deployment Scenarios
+
+### High Throughput / Backpressure
+- **Symptom**: "Thundering Herd" (429 Resource Exhausted) on startup.
+- **Fix**: Increase `.option("jitterMs", "2000")` to stagger connection attempts across executors.
+
+### Memory Leaks
+- **Symptom**: Executor OOM.
+- **Fix**: The connector uses off-heap memory. Ensure `spark.executor.memoryOverhead` is sufficient (recommend 512MB+ per core). The **Deadline Manager** has a 30-minute safe-guard to purge abandoned ack states.
+
+### Data Not Flowing (Read)
+- **Check**:
+    1. Is the Subscription attached to the correct Topic?
+    2. Are messages actually available? (Use `gcloud pubsub subscriptions pull --auto-ack ...`)
+    3. Is `init()` returning 0? (Check driver logs for `Rust: Subscription validation failed`).
