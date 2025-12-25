@@ -6,8 +6,7 @@
 //! It uses a background thread and a multi-producer single-consumer (MPSC) channel
 //! to decouple Rust execution from JNI/JVM latency.
 
-use jni::objects::AutoLocal;
-use jni::JavaVM;
+use jni::JNIEnv;
 use log::{Level, Log, Metadata, Record};
 use std::sync::{Once, OnceLock};
 use std::thread;
@@ -36,9 +35,12 @@ impl Log for JniLogger {
     fn flush(&self) {}
 }
 
+const LOGGER_CLASS: &str = "com/google/cloud/spark/pubsub/NativeLogger$";
+const LOGGER_SIG: &str = "Lcom/google/cloud/spark/pubsub/NativeLogger$;";
+
 /// Initialize the JNI Logger.
 /// Spawns a background thread that attaches to the JVM and calls `NativeLogger.log()`.
-pub fn init(vm: JavaVM) {
+pub fn init(env: &JNIEnv) {
     INIT.call_once(|| {
         let (tx, mut rx) = mpsc::channel::<(Level, String)>(10000);
 
@@ -58,6 +60,46 @@ pub fn init(vm: JavaVM) {
         };
         log::set_max_level(level_filter);
 
+        // Capture JavaVM to attach background thread
+        let vm = env.get_java_vm().expect("Failed to get JavaVM");
+
+        // Find the logger class and create a GlobalRef.
+        let logger_class = match env.find_class(LOGGER_CLASS) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Rust Logging: NativeLogger class not found: {:?}", e);
+                return;
+            }
+        };
+        let logger_class_global = env.new_global_ref(logger_class).expect("Failed to create GlobalRef for logger class");
+
+        // Get the singleton MODULE$ field using the class name string
+        let module_field = match env.get_static_field_id(
+            LOGGER_CLASS,
+            "MODULE$",
+            LOGGER_SIG,
+        ) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Rust Logging: Failed to get MODULE$: {:?}", e);
+                return;
+            }
+        };
+
+        let logger_obj = match env.get_static_field_unchecked(
+            LOGGER_CLASS,
+            module_field,
+            jni::signature::JavaType::Object(LOGGER_SIG.to_string()),
+        ) {
+            Ok(jni::objects::JValue::Object(obj)) => obj,
+            _ => {
+                eprintln!("Rust Logging: Failed to get logger object");
+                return;
+            }
+        };
+        
+        let logger_obj_global = env.new_global_ref(logger_obj).expect("Failed to create GlobalRef for logger instance");
+
         // Spawn background thread to drain logs to JNI
         thread::spawn(move || {
             // Attach this thread to the JVM
@@ -69,51 +111,13 @@ pub fn init(vm: JavaVM) {
                 }
             };
 
-            // Resolve class and method ID once
-            // We use AutoLocal to satisfy the Desc trait requirements for lookups
-            // AutoLocal::new takes (env, obj).
-            let logger_class = match env.find_class("com/google/cloud/spark/pubsub/NativeLogger$") {
-                Ok(c) => AutoLocal::new(&env, c.into()),
-                Err(e) => {
-                    eprintln!("Rust Logging: NativeLogger class not found: {:?}", e);
-                    return;
-                }
-            };
-
-            // Get the singleton MODULE$ field
-            // Note: AutoLocal implements Desc, so we can pass &logger_class
-            let module_field = match env.get_static_field_id(
-                &logger_class,
-                "MODULE$",
-                "Lcom/google/cloud/spark/pubsub/NativeLogger$;",
-            ) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("Rust Logging: Failed to get MODULE$: {:?}", e);
-                    return;
-                }
-            };
-
-            // JavaType::Object requires the signature string
-            let logger_obj = match env.get_static_field_unchecked(
-                &logger_class,
-                module_field,
-                jni::signature::JavaType::Object(
-                    "Lcom/google/cloud/spark/pubsub/NativeLogger$;".to_string(),
-                ),
-            ) {
-                Ok(jni::objects::JValue::Object(obj)) => obj,
-                _ => {
-                    eprintln!("Rust Logging: Failed to get logger object");
-                    return;
-                }
-            };
-
-            let log_method = match env.get_method_id(&logger_class, "log", "(ILjava/lang/String;)V")
+            // Look up the method ID inside the background thread.
+            // env.get_method_id is safe here because we have the class GlobalRef.
+            let log_method = match env.get_method_id(&logger_class_global, "log", "(ILjava/lang/String;)V")
             {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("Rust Logging: Failed to get log method: {:?}", e);
+                    eprintln!("Rust Logging: Failed to get log method in background thread: {:?}", e);
                     return;
                 }
             };
@@ -122,9 +126,9 @@ pub fn init(vm: JavaVM) {
                 .enable_all()
                 .build()
                 .unwrap();
+            
             rt.block_on(async {
                 while let Some((level, msg)) = rx.recv().await {
-                    // level mapping: Error=1, Warn=2, Info=3, Debug=4, Trace=5
                     let lvl_int = match level {
                         Level::Error => 1,
                         Level::Warn => 2,
@@ -139,7 +143,7 @@ pub fn init(vm: JavaVM) {
                     };
 
                     let _ = env.call_method_unchecked(
-                        logger_obj,
+                        &logger_obj_global,
                         log_method,
                         jni::signature::JavaType::Primitive(jni::signature::Primitive::Void),
                         &[
@@ -151,6 +155,6 @@ pub fn init(vm: JavaVM) {
             });
         });
 
-        eprintln!("Rust: JNI Logging initialized.");
+        eprintln!("Rust: JNI Logging initialized via GlobalRef.");
     });
 }

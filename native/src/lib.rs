@@ -117,10 +117,9 @@ mod jni {
         pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String) -> jlong {
             crate::safe_jni_call(0, || {
                 // Initialize JNI logging (safe to call multiple times)
-                if let Ok(vm) = env.get_java_vm() {
-                    crate::logging::init(vm);
-                    log::info!("Rust: NativeReader.init called for project: {}", project_id);
-                }
+                crate::logging::init(env);
+                println!("Rust Raw: NativeReader.init called for project: {}", project_id);
+                log::info!("Rust: NativeReader.init called for project: {}", project_id);
 
                 if jitter_millis > 0 {
                     let mut rng = rand::thread_rng();
@@ -167,10 +166,13 @@ mod jni {
                             format,
                             avro_schema,
                         });
+                        log::info!("Rust: NativeReader.init success. Pointer: {:?}", reader.as_ref() as *const _);
                         Box::into_raw(reader) as jlong
                     },
                     Err(e) => {
                         log::error!("Rust: Failed to create Pub/Sub client: {:?}", e);
+                        println!("Rust Raw: Failed to create Pub/Sub client for project {}, sub {}: {:?}", project_id, subscription_id, e);
+                        eprintln!("Rust: Failed to create Pub/Sub client for project {}, sub {}: {:?}", project_id, subscription_id, e);
                         0
                     }
                 }
@@ -349,10 +351,8 @@ mod jni {
             crate::safe_jni_call(0, || {
                 // Guideline 4: Staggered Initialization
                 // Initialize logging (safe to call multiple times)
-                if let Ok(vm) = _env.get_java_vm() {
-                    crate::logging::init(vm);
-                    log::info!("Rust: NativeWriter.init called for project: {}", project_id);
-                }
+                crate::logging::init(_env);
+                log::info!("Rust: NativeWriter.init called for project: {}", project_id);
 
                 let mut rng = rand::thread_rng();
                 let delay_ms = rand::Rng::gen_range(&mut rng, 0..500);

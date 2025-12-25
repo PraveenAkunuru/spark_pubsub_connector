@@ -12,7 +12,7 @@
 use google_cloud_googleapis::pubsub::v1::subscriber_client::SubscriberClient;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_token::TokenSourceProvider;
-use tonic::{transport::Channel, Request};
+use tonic::{transport::Channel, transport::ClientTlsConfig, transport::Certificate, Request};
 use tonic::metadata::MetadataValue;
 use tokio::sync::mpsc::{self, Receiver};
 use tokio::time::{Duration, Instant};
@@ -76,9 +76,14 @@ impl PubSubClient {
         let check_req = google_cloud_googleapis::pubsub::v1::GetSubscriptionRequest {
             subscription: full_sub_name.clone(),
         };
+        println!("Rust Raw: Validating subscription: {}", full_sub_name);
         match client.get_subscription(Request::new(check_req)).await {
-            Ok(_) => log::info!("Rust: Subscription validated: {}", full_sub_name),
+            Ok(_) => {
+                println!("Rust Raw: Subscription validated: {}", full_sub_name);
+                log::info!("Rust: Subscription validated: {}", full_sub_name);
+            },
             Err(e) => {
+                println!("Rust Raw: Subscription validation failed: {:?}", e);
                 log::error!("Rust: Subscription validation failed: {:?}", e);
                 return Err(Box::new(e));
             }
@@ -330,9 +335,19 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
         ch
     } else {
         log::debug!("Rust: Creating new gRPC channel for {}", endpoint);
-        let ch = Channel::from_shared(endpoint.clone())?
-            .connect()
-            .await?;
+        let mut endpoint_builder = Channel::from_shared(endpoint.clone())?;
+        if emulator_host.is_none() {
+            let mut tls_config = ClientTlsConfig::new();
+            // Try to load system CA explicitly to resolve UnknownIssuer on some platforms
+            if let Ok(ca_data) = std::fs::read("/etc/ssl/certs/ca-certificates.crt") {
+                log::info!("Rust: Loading explicit CA roots from /etc/ssl/certs/ca-certificates.crt");
+                tls_config = tls_config.ca_certificate(Certificate::from_pem(ca_data));
+            }
+            endpoint_builder = endpoint_builder.tls_config(tls_config)?;
+        }
+        println!("Rust Raw: Connecting to gRPC endpoint: {}", endpoint);
+        let ch = endpoint_builder.connect().await?;
+        println!("Rust Raw: Connected to gRPC endpoint: {}", endpoint);
         let mut pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
         pool.insert(endpoint, ch.clone());
         ch
@@ -341,14 +356,25 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     let header_val = if emulator_host.is_some() {
         None
     } else {
-        let config = google_cloud_auth::project::Config::default();
+        let mut config = google_cloud_auth::project::Config::default();
+        config.scopes = Some(&[
+            "https://www.googleapis.com/auth/cloud-platform",
+            "https://www.googleapis.com/auth/pubsub"
+        ]);
         let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
         let token_source = ts.token_source();
         let token = token_source.token().await?;
+        
+        log::info!("Rust Auth: Acquired token (length: {}, prefix: {})", 
+            token.len(), 
+            if token.len() > 10 { &token[..10] } else { "short" });
+        println!("Rust Raw: Acquired token (len={})", token.len());
+
         let val = MetadataValue::from_str(&format!("Bearer {}", token))?;
         Some(val)
     };
 
+    println!("Rust Raw: create_channel_and_header success");
     Ok((channel, header_val))
 }
 
