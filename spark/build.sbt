@@ -26,12 +26,50 @@ lazy val javaOpts = Seq(
   "-Dio.netty.tryReflectionSetAccessible=true"
 )
 
+
+
+lazy val copyNativeLibs = taskKey[Unit]("Copies native libraries to resources")
+
 lazy val commonSettings = Seq(
   version := "0.1.0",
   fork in Test := true,
   envVars in Test := Map(
     "PUBSUB_EMULATOR_HOST" -> sys.env.getOrElse("PUBSUB_EMULATOR_HOST", "localhost:8085")
-  )
+  ),
+  copyNativeLibs := {
+    val log = streams.value.log
+    // baseDirectory is modules/spark35, parent is spark, parent parent is root
+    val rootDir = baseDirectory.value.getParentFile.getParentFile
+    val nativeTarget = rootDir / "native" / "target" / "release"
+    val resourceDir = rootDir / "spark" / "src" / "main" / "resources"
+    
+    // Detect current Arch (rudimentary)
+    val os = System.getProperty("os.name").toLowerCase
+    val arch = System.getProperty("os.arch").toLowerCase
+    
+    val osName = if (os.contains("linux")) "linux" else if (os.contains("mac")) "darwin" else "unknown"
+    val archName = if (arch == "amd64" || arch == "x86_64") "x86-64" else if (arch == "aarch64") "aarch64" else "unknown"
+    
+    if (osName != "unknown" && archName != "unknown") {
+      val platformDir = resourceDir / s"$osName-$archName"
+      if (!platformDir.exists()) platformDir.mkdirs()
+      
+      val libName = "libnative_pubsub_connector.so" // Or .dylib for mac, but rust produces .so/.dylib
+      val sourceFile = nativeTarget / libName
+      // On mac rust might produce .dylib? cargo build produces .dylib on mac?
+      // For now assuming linux/so or user handles it.
+      
+      if (sourceFile.exists()) {
+        val destFile = platformDir / libName
+        IO.copyFile(sourceFile, destFile)
+        log.info(s"Copied native lib to $destFile")
+      } else {
+        log.warn(s"Native lib not found at $sourceFile. Run 'cargo build --release' in native/ first.")
+      }
+    }
+  },
+  // Run copyNativeLibs before Compile
+  Compile / compile := ((Compile / compile) dependsOn copyNativeLibs).value
 )
 
 lazy val spark33 = (project in file("spark33"))
@@ -67,7 +105,8 @@ lazy val spark35 = (project in file("spark35"))
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",
-      "org.scalatest" %% "scalatest" % "3.2.16" % Test
+      "org.scalatest" %% "scalatest" % "3.2.16" % Test,
+      "org.apache.avro" % "avro" % "1.11.3" % Test
     ),
     // Force Arrow to use Spark's Jackson versions to prevent binary incompatibility
     dependencyOverrides ++= Seq(

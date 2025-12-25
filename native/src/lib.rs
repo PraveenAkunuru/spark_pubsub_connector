@@ -64,8 +64,17 @@ where
 {
     match std::panic::catch_unwind(f) {
         Ok(res) => res,
-        Err(_) => {
-            log::error!("Rust: Panic occurred in JNI call");
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                format!("Panic: {}", s)
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                format!("Panic: {}", s)
+            } else {
+                "Panic occurred (unknown cause)".to_string()
+            };
+            log::error!("Rust: Panic in JNI call: {}", msg);
+            // Also try eprintln if logging failed or panic was related to logging
+            eprintln!("Rust: Panic in JNI call: {}", msg);
             error_val
         }
     }
@@ -100,7 +109,7 @@ mod jni {
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
         pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String) -> jlong {
             crate::safe_jni_call(0, || {
-                // Initialize logging (safe to call multiple times)
+                // Initialize JNI logging (safe to call multiple times)
                 if let Ok(vm) = env.get_java_vm() {
                     crate::logging::init(vm);
                     log::info!("Rust: NativeReader.init called for project: {}", project_id);
@@ -112,6 +121,27 @@ mod jni {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 }
 
+                // Parse configuration and schema
+                let (arrow_schema, format, avro_schema) = if !schema_json.is_empty() {
+                    // Heuristic: If starts with '[', it's legacy array schema
+                    if schema_json.trim_start().starts_with('[') {
+                         let s = crate::arrow_convert::parse_simple_schema(&schema_json);
+                         log::info!("Rust: Detected legacy schema parsing.");
+                         (s, crate::arrow_convert::DataFormat::Json, None)
+                    } else {
+                        match crate::arrow_convert::parse_processing_config(&schema_json) {
+                            Ok(c) => (c.arrow_schema, c.format, c.avro_schema),
+                            Err(e) => {
+                                log::warn!("Rust: Failed to parse processing config: {}", e);
+                                (None, crate::arrow_convert::DataFormat::Json, None)
+                            }
+                        }
+                    }
+                } else {
+                    (None, crate::arrow_convert::DataFormat::Json, None)
+                };
+
+                // Create Tokio Runtime
                 let rt = match Runtime::new() {
                     Ok(r) => r,
                     Err(e) => {
@@ -120,35 +150,22 @@ mod jni {
                     }
                 };
                 
+                // Create Publisher Client
                 let client_res = rt.block_on(async {
                     PubSubClient::new(&project_id, &subscription_id).await
                 });
 
-                // Start the deadline manager on this runtime
-                crate::pubsub::start_deadline_manager(&rt);
-                
-                // Parse Schema if provided
-                let arrow_schema = if !schema_json.is_empty() {
-                    match serde_json::from_str::<arrow::datatypes::Schema>(&schema_json) {
-                        Ok(s) => {
-                            log::info!("Rust: Successfully parsed user schema: {:?}", s);
-                            Some(std::sync::Arc::new(s))
-                        },
-                        Err(e) => {
-                            log::warn!("Rust: Failed to parse schema JSON: {}. Falling back to Raw Mode.", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-
                 match client_res {
                     Ok(client) => {
+                        // Start the deadline manager explicitly if needed (usually tied to client lifecycle or global)
+                        crate::pubsub::start_deadline_manager(&rt);
+
                         let reader = Box::new(crate::RustPartitionReader {
                             rt,
                             client,
                             schema: arrow_schema,
+                            format,
+                            avro_schema,
                         });
                         Box::into_raw(reader) as jlong
                     },
@@ -160,9 +177,6 @@ mod jni {
             })
         }
 
-        /// Fetches the next batch of messages from the background queue, converts them to an Arrow batch,
-        /// and exports them directly into the memory addresses provided by Spark (out_array, out_schema).
-        /// Returns 1 if a batch was produced, 0 if no messages are available, or a negative error code.
         /// Fetches the next batch of messages from the background queue, converts them to an Arrow batch,
         /// and exports them directly into the memory addresses provided by Spark (out_array, out_schema).
         /// Returns 1 if a batch was produced, 0 if no messages are available, or a negative error code.
@@ -197,7 +211,7 @@ mod jni {
                         .extend(ack_ids);
                 }
 
-                let mut builder = ArrowBatchBuilder::new(reader.schema.clone());
+                let mut builder = ArrowBatchBuilder::new(reader.schema.clone(), reader.format, reader.avro_schema.clone());
                 for msg in msgs {
                     builder.append(&msg);
                 }
@@ -492,13 +506,20 @@ mod jni {
 
 
 
-        pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong) -> i32 {
+        pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong, timeout_ms: jlong) -> i32 {
             crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
                     let writer = unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
                     // Flush before dropping (which kills the runtime)
                     let flush_res = writer.rt.block_on(async {
-                        if let Err(e) = writer.client.flush().await {
+                        // Use provided timeout or default to 30s if something is wrong (though Scala should enforce valid long)
+                        let timeout = if timeout_ms > 0 {
+                            std::time::Duration::from_millis(timeout_ms as u64)
+                        } else {
+                            std::time::Duration::from_secs(30)
+                        };
+
+                        if let Err(e) = writer.client.flush(timeout).await {
                             log::error!("Rust: Writer close flush failed: {}", e);
                             return -1;
                         }
@@ -520,6 +541,8 @@ pub struct RustPartitionReader {
     rt: Runtime,
     client: PubSubClient,
     schema: Option<arrow::datatypes::SchemaRef>,
+    format: crate::arrow_convert::DataFormat,
+    avro_schema: Option<apache_avro::Schema>,
 }
 
 /// Internal state for a Spark partition writer, including its dedicated Tokio runtime.

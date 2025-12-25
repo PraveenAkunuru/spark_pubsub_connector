@@ -88,9 +88,11 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
     
     
     val jitterMillis = options.getOrElse(PubSubConfig.JITTER_MS_KEY, PubSubConfig.DEFAULT_JITTER_MS).toInt
+    val format = options.get(PubSubConfig.FORMAT_KEY)
+    val avroSchema = options.get(PubSubConfig.AVRO_SCHEMA_KEY)
 
     (0 until numPartitions).map { i =>
-      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis)
+      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema)
     }.toArray
   }
 
@@ -115,7 +117,9 @@ case class PubSubInputPartition(
     subscriptionId: String,
     committedBatchIds: List[String],
     batchId: String,
-    jitterMillis: Int) extends InputPartition
+    jitterMillis: Int,
+    format: Option[String],
+    avroSchema: Option[String]) extends InputPartition
 
 /**
  * Factory class that initializes `PubSubPartitionReader` on the executors.
@@ -224,6 +228,7 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
         val columnarVectors = schema.fields.map { field =>
           new ArrowColumnVector(root.getVector(field.name))
         }
+
         currentBatch = new ColumnarBatch(columnarVectors.toArray, root.getRowCount)
         true
         

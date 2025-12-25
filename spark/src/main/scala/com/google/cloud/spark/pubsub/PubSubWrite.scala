@@ -57,6 +57,7 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private val batchSize = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
   private val lingerMs = options.getOrElse(PubSubConfig.LINGER_MS_KEY, PubSubConfig.DEFAULT_LINGER_MS.toString).toLong
   private val maxBatchBytes = options.getOrElse(PubSubConfig.MAX_BATCH_BYTES_KEY, "5242880").toLong // 5MB default
+  private val flushTimeoutMs = options.getOrElse(PubSubConfig.FLUSH_TIMEOUT_MS_KEY, PubSubConfig.DEFAULT_FLUSH_TIMEOUT_MS.toString).toLong
   
   private val writer = new NativeWriter()
   logInfo(s"PubSubDataWriter created for $projectId/$topicId, partitionId: $partitionId, taskId: $taskId")
@@ -151,18 +152,34 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
     close()
   }
 
+  // Safety Net: Ensure close is called even if task fails
+  Option(org.apache.spark.TaskContext.get()).foreach { tc =>
+    tc.addTaskCompletionListener[Unit] { _ =>
+      close()
+    }
+  }
+
+  private var closed = false
+
   override def close(): Unit = {
-    val res = writer.close(nativePtr)
-    if (res < 0) {
-      logError(s"NativeWriter.close failed with code $res")
-      // We should throw to signal task failure, especially for Flush errors
-      throw new RuntimeException(s"NativeWriter.close failed with code $res")
+    if (!closed) {
+      // NOTE: We might be called by TaskCompletionListener on failure.
+      // If so, we still attempt to flush/close native writer.
+      // If native writer fails, we log it but maybe shouldn't re-throw if task is already failed?
+      // Spark's TaskContext doesn't easily say if task is failed vs success in listener (except maybe by tracking yourself).
+      // For now, we keep original behavior: throw if close fails.
+      val res = writer.close(nativePtr, flushTimeoutMs)
+      if (res < 0) {
+        logError(s"NativeWriter.close failed with code $res")
+        throw new RuntimeException(s"NativeWriter.close failed with code $res")
+      }
+      if (root != null) {
+        root.close()
+      }
+      allocator.close()
+      closed = true
+      logInfo(s"PubSubDataWriter closed for partitionId: $partitionId")
     }
-    if (root != null) {
-      root.close()
-    }
-    allocator.close()
-    logInfo(s"PubSubDataWriter closed for partitionId: $partitionId")
   }
 }
 

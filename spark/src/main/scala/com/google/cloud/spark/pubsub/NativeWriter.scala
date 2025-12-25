@@ -27,5 +27,5 @@ class NativeWriter {
    * Flushes outstanding requests and shuts down the native publisher.
    * Returns 0 on success, or negative error code.
    */
-  @native def close(writerPtr: Long): Int
+  @native def close(writerPtr: Long, timeoutMs: Long): Int
 }

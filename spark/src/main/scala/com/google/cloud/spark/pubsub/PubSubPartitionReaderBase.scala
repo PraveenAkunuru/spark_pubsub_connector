@@ -20,12 +20,33 @@ abstract class PubSubPartitionReaderBase[T](
   protected val reader = new NativeReader()
   logInfo(s"PubSubPartitionReader created for ${partition.subscriptionId}")
 
-  protected val schemaJson: String = try {
-    PubSubArrowUtils.toArrowSchema(schema)
-  } catch {
-    case e: Exception =>
-      logWarning(s"Failed to convert schema to Arrow JSON: ${e.getMessage}. Using raw mode.")
-      ""
+  protected val schemaJson: String = {
+    import org.apache.spark.sql.types._
+    val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+    val rootArgs = mapper.createObjectNode()
+
+    val columnsArr = mapper.createArrayNode()
+    schema.fields.foreach { field =>
+      val fieldObj = mapper.createObjectNode()
+      fieldObj.put("name", field.name)
+      val typeName = field.dataType match {
+        case StringType => "string"
+        case IntegerType => "int"
+        case LongType => "long"
+        case BooleanType => "boolean"
+        case FloatType => "float"
+        case DoubleType => "double"
+        case _ => "string" // Fallback
+      }
+      fieldObj.put("type", typeName)
+      columnsArr.add(fieldObj)
+    }
+    rootArgs.set("columns", columnsArr)
+
+    partition.format.foreach(f => rootArgs.put("format", f))
+    partition.avroSchema.foreach(s => rootArgs.put("avroSchema", s))
+
+    mapper.writeValueAsString(rootArgs)
   }
 
   protected val nativePtr: Long = reader.init(
@@ -81,8 +102,20 @@ abstract class PubSubPartitionReaderBase[T](
     }
   }
 
+  // Safety Net: Ensure close is called even if task fails
+  Option(org.apache.spark.TaskContext.get()).foreach { tc =>
+    tc.addTaskCompletionListener[Unit] { _ =>
+      close()
+    }
+  }
+
+  private var closed = false
+
   override def close(): Unit = {
-    reader.close(nativePtr)
-    allocator.close()
+    if (!closed) {
+      reader.close(nativePtr)
+      allocator.close()
+      closed = true
+    }
   }
 }

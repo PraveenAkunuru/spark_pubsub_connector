@@ -14,6 +14,7 @@ These options are passed to the connector via `.option("key", "value")` in your 
 | `spark.pubsub.jitter.ms` | Random jitter delay (ms) during Reader initialization to prevent "Thundering Herd" on the Pub/Sub service when many executors start simultaneously. | No | `500` |
 | `maxBatchBytes` | Maximum size in bytes for a batch before flushing (Write). | No | ~5MB |
 | `lingerMs` | Maximum time in milliseconds to wait before flushing a partial batch (Write). | No | `1000` (1s) |
+| `flushTimeoutMs` | Maximum time (ms) to wait for a native flush to complete during shutdown. | No | `30000` (30s) |
 
 ## Parallelism Configuration
 

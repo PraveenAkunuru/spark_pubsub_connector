@@ -16,7 +16,7 @@ class NegativeWriterTest extends AnyFunSuite {
     // Rust client might allow empty projectId during structural init and fail only on connection.
     // So we can't assert ptr == 0.
     if (ptr != 0) {
-        writer.close(ptr)
+        writer.close(ptr, 30000)
     }
   }
 
@@ -53,7 +53,7 @@ class NegativeWriterTest extends AnyFunSuite {
       
       arrowArray.close()
       arrowSchema.close()
-      writer.close(ptr)
+      writer.close(ptr, 30000)
       root.close()
       // Wait, if writeBatch failed, did it take ownership?
       // If it returned error code, usually it implies it rejected it.
@@ -87,7 +87,7 @@ class NegativeWriterTest extends AnyFunSuite {
 
       arrowArray.close()
       arrowSchema.close()
-      writer.close(ptr)
+      writer.close(ptr, 30000)
       root.close()
       allocator.close()
     }
@@ -130,7 +130,7 @@ class NegativeWriterTest extends AnyFunSuite {
       
       arrowArray.close()
       arrowSchema.close()
-      writer.close(ptr)
+      writer.close(ptr, 30000)
       root.close()
       allocator.close()
     }

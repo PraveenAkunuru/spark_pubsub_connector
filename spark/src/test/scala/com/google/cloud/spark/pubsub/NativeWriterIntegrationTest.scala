@@ -58,7 +58,7 @@ class NativeWriterIntegrationTest extends AnyFunSuite {
     // If we close 'root', it might try to free buffers again?
     // Let's verify allocator state.
     
-    writer.close(ptr)
+    writer.close(ptr, 30000)
     
     // In Move semantics, Rust releases its reference (1 -> 0).
     // Java still holds 'root' (Ref 1). We MUST close it to release local reference.

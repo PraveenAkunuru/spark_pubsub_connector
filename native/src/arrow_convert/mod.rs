@@ -12,6 +12,110 @@ pub mod reader;
 pub use builder::ArrowBatchBuilder;
 pub use reader::ArrowBatchReader;
 
+use arrow::datatypes::{DataType, Field, Schema};
+use std::sync::Arc;
+// use crate::arrow_convert::builder::ArrowBatchBuilder; // Removed duplicate
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SimpleField {
+    name: String,
+    #[serde(rename = "type")]
+    type_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DataFormat {
+    Json,
+    Avro,
+}
+
+pub struct ProcessingConfig {
+    pub arrow_schema: Option<Arc<Schema>>,
+    pub format: DataFormat,
+    pub avro_schema: Option<apache_avro::Schema>,
+}
+
+#[derive(serde::Deserialize)]
+struct ConfigDto {
+    columns: Option<Vec<SimpleField>>,
+    format: Option<String>,
+    #[serde(rename = "avroSchema")]
+    avro_schema: Option<String>,
+}
+
+pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
+    // Try to parse as ConfigDto
+    let config: ConfigDto = serde_json::from_str(json).map_err(|e| e.to_string())?;
+
+    let format = match config.format.as_deref() {
+        Some("avro") => DataFormat::Avro,
+        _ => DataFormat::Json,
+    };
+
+    let arrow_schema = if let Some(cols) = config.columns {
+        let arrow_fields: Vec<Field> = cols
+            .into_iter()
+            .map(|f| {
+                let dtype = match f.type_name.as_str() {
+                    "string" => DataType::Utf8,
+                    "int" => DataType::Int32,
+                    "long" => DataType::Int64,
+                    "boolean" => DataType::Boolean,
+                    "float" => DataType::Float32,
+                    "double" => DataType::Float64,
+                    _ => DataType::Utf8,
+                };
+                Field::new(f.name, dtype, true)
+            })
+            .collect();
+        Some(Arc::new(Schema::new(arrow_fields)))
+    } else {
+        None
+    };
+
+    let avro_schema = if let Some(s) = config.avro_schema {
+        if format == DataFormat::Avro {
+            Some(apache_avro::Schema::parse_str(&s).map_err(|e| format!("Invalid Avro Schema: {}", e))?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(ProcessingConfig {
+        arrow_schema,
+        format,
+        avro_schema,
+    })
+}
+
+// Deprecated/Legacy helper kept if needed, but parse_processing_config covers it
+pub fn parse_simple_schema(json: &str) -> Option<Arc<Schema>> {
+    // If input is just list of fields (legacy Array), wrap it?
+    // Or just try to parse as list of SimpleField
+    if let Ok(fields) = serde_json::from_str::<Vec<SimpleField>>(json) {
+         let arrow_fields: Vec<Field> = fields
+            .into_iter()
+            .map(|f| {
+                let dtype = match f.type_name.as_str() {
+                    "string" => DataType::Utf8,
+                    "int" => DataType::Int32,
+                    "long" => DataType::Int64,
+                    "boolean" => DataType::Boolean,
+                    "float" => DataType::Float32,
+                    "double" => DataType::Float64,
+                    _ => DataType::Utf8,
+                };
+                Field::new(f.name, dtype, true)
+            })
+            .collect();
+         return Some(Arc::new(Schema::new(arrow_fields)));
+    }
+    // Fallback to config parsing if it's an object
+    parse_processing_config(json).ok().and_then(|c| c.arrow_schema)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -20,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_arrow_batch_builder_raw() {
-        let mut builder = ArrowBatchBuilder::new(None);
+        let mut builder = ArrowBatchBuilder::new(None, DataFormat::Json, None);
 
         let msg1 = ReceivedMessage {
             ack_id: "ack1".to_string(),

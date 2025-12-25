@@ -1,48 +1,55 @@
-# Restart Guide: Spark Pub/Sub Connector (Phase 10 & Hardening)
+# Restart/Resume Guide - Spark Pub/Sub Connector Phase 2
 
-Use this guide to resume work after restarting the project environment.
+**Date:** 2025-12-25
+**Current Phase:** Phase 2 - Production Hardening & Spark Integration
 
-## 📍 Current Status: Phase 10 Verification
-We have completed the core implementation of Phase 10 (Vectorized Reader and Metrics). Stability verification is 95% complete, but a critical JNI panic was discovered in the latest throughput run.
+## 1. Completed Work (Session Checkpoint)
+We have successfully implemented the following critical hardening features:
 
-### ✅ Completed Milestones
-- **Vectorized Reader**: Implemented `PubSubColumnarPartitionReader` using `ArrowColumnVector` for zero-copy Spark processing.
-- **Custom Metrics**: Implemented `pubsub_backlog_count` into Spark's metric system.
-- **Scalability**: Successfully ran tests with 10 partitions and 10,000 messages against the emulator.
-- **Benchmarks**: Preliminary throughput achieved ~40-60 MB/s for 1KB payloads on local machine.
-- **Documentation**: Updated `README.md` and `ARCHITECTURE.md` to reflect the final architecture.
-- **Hardening (In Progress)**: Rust clippy fixes for type complexity and literal formatting.
+### A. Synchronous Flush Timeout (Writer)
+- **Status:** ✅ Complete
+- **Details:** `NativeWriter.close()` now accepts a timeout (default 30s). Prevents hangs.
+- **Files**: `native/src/pubsub.rs`, `spark/.../NativeWriter.scala`, `docs/configuration.md`.
 
-## 🛑 Identified Issues
-1. **JNI Panic**: A `panic in a function that cannot unwind` was hit in `NativeReader_init`. This usually happens when a panic occurs inside an `extern "C"` function or within a `catch_unwind` block that doesn't handle a specific failure mode correctly.
-   - *Log Source*: `test_output_v6.log` or previous terminal output.
-2. **Resource Exhaustion**: Stuck `sbt` and `java` processes were consuming overhead. A full cleanup was initiated.
+### B. Lifecycle Safety Nets (Reader/Writer)
+- **Status:** ✅ Complete
+- **Details:** Added `TaskCompletionListener` to ensure `close()` is called on task failure/completion. Made `close()` idempotent.
+- **Files**: `PubSubPartitionReaderBase.scala`, `PubSubDataWriter.scala`.
+- **Tests**: Added `NegativeReaderTest.scala`.
 
-## 🚀 Resumption Steps
+### C. Optimize Dynamic Attribute Mapping (Reader)
+- **Status:** ✅ Complete
+- **Details:** Native reader now promotes Pub/Sub attributes to Spark top-level columns if they match the schema and are missing from the JSON payload.
+- **Files**: `native/src/arrow_convert/builder.rs`.
+- **Tests**: Verified with `test_arrow_batch_builder_structured_with_attributes` in `native`.
 
-### 1. Environment Check
-Ensure the Pub/Sub emulator can start and the native library is built.
+## 2. Immediate Next Steps
+When resuming, start with **Multi-Arch Packaging**.
+
+1.  **Multi-Arch Packaging (x86_64, aarch64)**
+    -   **Goal**: Ensure the JAR contains native libs for both architectures or proper classifiers.
+    -   **Action**: Update `native/Cargo.toml` / build scripts if needed, or just documenting cross-compilation.
+
+2.  **Schema-Mode Offloading**
+    -   **Goal**: Move JSON parsing fully to Rust (already partially done, need to finalize/optimize).
+
+3.  **Dynamic Scaling Metrics**
+    -   **Goal**: Implement Spark `CustomTaskMetric` to report average message size/processing time.
+
+## 3. Environment & Known Issues
+-   **Linking Error**: We encountered `UnsatisfiedLinkError: libgcc_s.so.1` when using the default JVM.
+    -   **Workaround**: Use `java-17-openjdk-amd64` or set `LD_LIBRARY_PATH=/lib/x86_64-linux-gnu`.
+    -   **Status**: Tests pass with the workaround.
+-   **Emulator Tests**: `NegativeWriterTest` might show "Connection refused" if emulator is not running, which is expected for "negative" tests verifying error handling, but `NativeWriterIntegrationTest` requires a running emulator.
+    -   use `scripts/run_throughput_test.sh` logic to spin up emulator if needed.
+
+## 4. Commands to Resume
 ```bash
-cd native && cargo build --release
+# Verify Native Unit Tests (Attribute Mapping)
+cd native && cargo test
+
+# Verify Spark Tests (Requires correct Java)
+cd ../spark
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+java -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.NegativeReaderTest"
 ```
-
-### 2. Immediate Fixes
-- **Address JNI Panic**: Investigate `native/src/lib.rs` around line 100-150 (`NativeReader.init`). Ensure all gRPC setup and Tokio runtime initialization are correctly wrapped and don't exit the `catch_unwind` abruptly.
-- **Complete Clippy**: Fix the remaining digits grouping error in `native/src/arrow_convert.rs:204`.
-
-### 3. Final Verification
-Run the throughput and scale tests to ensure no regression after the panic fix:
-```bash
-./run_scale_test.sh
-./run_throughput_test.sh
-```
-
-### 4. Code Review & Push
-- Review `PubSubMicroBatchStream.scala` for any redundant imports or commented-out metric code.
-- Commit all changes and push to the remote repository.
-
-## 📝 Performance Baseline (Last Run)
-- **Message Size**: 1 KB
-- **Throughput**: ~40 MB/s
-- **Parallelism**: 10 Partitions
-- **Environment**: Local Machine (4-core)

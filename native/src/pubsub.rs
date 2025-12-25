@@ -408,21 +408,21 @@ impl PublisherClient {
     }
     
     /// Flushes all pending messages by sending a Flush command and waiting for it to be processed.
-    pub async fn flush(&self) -> Result<(), String> {
+    pub async fn flush(&self, timeout: Duration) -> Result<(), String> {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {
             log::warn!("Rust: Failed to send flush command: {:?}", e);
             return Err("Failed to send flush command (background task died?)".to_string());
         }
         
-        match tokio::time::timeout(Duration::from_secs(30), ack_rx).await {
+        match tokio::time::timeout(timeout, ack_rx).await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => {
                 log::error!("Rust: Flush wait failed (channel closed): {:?}", e);
                 Err("Flush channel closed (background task died?)".to_string())
             },
             Err(_) => {
-                log::error!("Rust: Flush timed out after 30s");
+                log::error!("Rust: Flush timed out after {:?}.", timeout);
                 Err("Flush timed out".to_string())
             }
         }

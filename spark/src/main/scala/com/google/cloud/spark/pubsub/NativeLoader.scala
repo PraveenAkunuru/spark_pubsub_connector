@@ -15,7 +15,6 @@ import java.nio.file.Files
 object NativeLoader {
   private var loaded = false
   private val LIB_NAME = "native_pubsub_connector"
-  private val BUNDLED_LIB_PATH = s"/lib$LIB_NAME.so"
 
   /**
    * Triggers the loading of the native library if it hasn't been loaded yet.
@@ -36,9 +35,12 @@ object NativeLoader {
   }
 
   private def loadFromClasspath(): Unit = {
-    val inputStream = getClass.getResourceAsStream(BUNDLED_LIB_PATH)
+    val platformPath = getPlatformPath
+    val resourcePath = s"/$platformPath/lib$LIB_NAME.so"
+    
+    val inputStream = getClass.getResourceAsStream(resourcePath)
     if (inputStream == null) {
-      throw new RuntimeException(s"Native library $BUNDLED_LIB_PATH not found in classpath")
+      throw new RuntimeException(s"Native library $resourcePath not found in classpath. Supported platforms: linux-x86-64, linux-aarch64, darwin-x86-64, darwin-aarch64.")
     }
 
     try {
@@ -62,5 +64,20 @@ object NativeLoader {
     } finally {
       inputStream.close()
     }
+  }
+
+  private def getPlatformPath: String = {
+    val os = System.getProperty("os.name").toLowerCase
+    val arch = System.getProperty("os.arch").toLowerCase
+
+    val osName = if (os.contains("linux")) "linux"
+    else if (os.contains("mac") || os.contains("darwin")) "darwin"
+    else throw new RuntimeException(s"Unsupported OS: $os")
+
+    val archName = if (arch == "amd64" || arch == "x86_64") "x86-64"
+    else if (arch == "aarch64" || arch == "arm64") "aarch64"
+    else throw new RuntimeException(s"Unsupported Architecture: $arch")
+
+    s"$osName-$archName"
   }
 }
