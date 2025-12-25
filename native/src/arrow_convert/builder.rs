@@ -139,17 +139,18 @@ impl ArrowBatchBuilder {
         }
     }
 
+    /// Appends a row from an Avro record.
     fn append_avro_to_row(
         builders: &mut [Box<dyn ArrayBuilder>],
         fields: &[Field],
         record: Option<&AvroValue>,
         attributes: &std::collections::HashMap<String, String>,
     ) {
-         for (i, field) in fields.iter().enumerate() {
+        for (i, field) in fields.iter().enumerate() {
             let field_name = field.name();
             // Try to find field in Avro record
             let mut found_val: Option<&AvroValue> = None;
-            
+
             if let Some(AvroValue::Record(entries)) = record {
                 for (k, v) in entries {
                     if k == field_name {
@@ -158,18 +159,24 @@ impl ArrowBatchBuilder {
                     }
                 }
             }
-            
-            // Try explict Avro value, then attribute
-            if found_val.is_some() && !matches!(found_val.unwrap(), AvroValue::Null) {
-                Self::append_avro_value(&mut builders[i], found_val.unwrap(), field.data_type());
-            } else if let Some(attr_val) = attributes.get(field_name) {
-                Self::append_attr_value(&mut builders[i], attr_val, field.data_type()); 
-            } else {
-                 Self::append_null(&mut builders[i], field.data_type());
+
+            // Use the value from Avro if present and not Null, otherwise fallback to attributes
+            match found_val {
+                Some(val) if !matches!(val, AvroValue::Null) => {
+                    Self::append_avro_value(&mut builders[i], val, field.data_type());
+                }
+                _ => {
+                    if let Some(attr_val) = attributes.get(field_name) {
+                        Self::append_attr_value(&mut builders[i], attr_val, field.data_type());
+                    } else {
+                        Self::append_null(&mut builders[i], field.data_type());
+                    }
+                }
             }
-         }
+        }
     }
 
+    /// Appends a single Avro value to the given builder, performing type-safe conversion.
     fn append_avro_value(
         builder: &mut Box<dyn ArrayBuilder>,
         value: &AvroValue,
@@ -240,12 +247,14 @@ impl ArrowBatchBuilder {
         }
     }
     
+    /// Appends null values to all provided builders.
     fn append_nulls_for_all(builders: &mut [Box<dyn ArrayBuilder>], fields: &[Field]) {
          for (i, field) in fields.iter().enumerate() {
              Self::append_null(&mut builders[i], field.data_type());
          }
     }
 
+    /// Appends a row from a JSON value.
     fn append_json_to_row(
         builders: &mut [Box<dyn ArrayBuilder>],
         fields: &[Field],
@@ -268,6 +277,7 @@ impl ArrowBatchBuilder {
         }
     }
     
+    /// Appends an attribute value to a builder, attempting to parse it into the target type.
     fn append_attr_value(
         builder: &mut Box<dyn ArrayBuilder>,
         value: &str,
@@ -321,6 +331,7 @@ impl ArrowBatchBuilder {
          }
     }
 
+    /// Appends a single JSON value to its corresponding builder.
     fn append_json_value(
         builder: &mut Box<dyn ArrayBuilder>,
         value: Option<&Value>,
@@ -391,7 +402,8 @@ impl ArrowBatchBuilder {
             }
         }
     }
-    
+
+    /// Appends a null value to the builder for the given data type.
     fn append_null(builder: &mut Box<dyn ArrayBuilder>, dtype: &DataType) {
         match dtype {
             DataType::Utf8 => builder
@@ -472,13 +484,11 @@ impl ArrowBatchBuilder {
             let payload_array = Arc::new(self.payloads.as_mut().unwrap().finish()) as ArrayRef;
             fields.insert(2, Field::new("payload", DataType::Binary, true));
             arrays.insert(2, payload_array);
-        } else {
-            if let Some(builders) = self.struct_builders.as_mut() {
-                for (i, builder) in builders.iter_mut().enumerate() {
-                    let arr = builder.finish();
-                    arrays.push(arr);
-                    fields.push(self.struct_fields[i].clone());
-                }
+        } else if let Some(builders) = self.struct_builders.as_mut() {
+            for (i, builder) in builders.iter_mut().enumerate() {
+                let arr = builder.finish();
+                arrays.push(arr);
+                fields.push(self.struct_fields[i].clone());
             }
         }
 

@@ -147,7 +147,7 @@ class PubSubPartitionReaderFactory(schema: StructType) extends PartitionReaderFa
 class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType) 
   extends PubSubPartitionReaderBase[InternalRow](partition, schema) {
   
-  import org.apache.spark.sql.util.PubSubArrowUtils
+  import com.google.cloud.spark.pubsub.ArrowUtils
   
   private var currentBatch: java.util.Iterator[InternalRow] = java.util.Collections.emptyIterator()
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
@@ -177,7 +177,7 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
           val values = fieldVectors.indices.map { j =>
             val vec = fieldVectors(j)
             if (vec != null) {
-               org.apache.spark.sql.util.PubSubArrowUtils.getValue(vec, i)
+                ArrowUtils.getValue(vec, i)
             } else {
                null
             }

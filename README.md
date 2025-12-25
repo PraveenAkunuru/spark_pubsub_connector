@@ -1,7 +1,7 @@
 # Spark Pub/Sub Connector (Native Rust/Arrow)
 
 > [!WARNING]
-> **EXPERIMENTAL**: This project is currently in active development (Phase 5.6). APIs, configuration options, and internal architecture are subject to breaking changes. This connector is **not yet recommended for production usage**.
+> **STABLE DEVELOPMENT**: This project has completed its core refactoring and code review (Phase 6.0). APIs are stable, but comprehensive production soak testing is still in progress.
 
 A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Structured Streaming), leveraging **Rust** and **Apache Arrow** for zero-copy data transfer and gRPC efficiency.
 
@@ -11,15 +11,15 @@ A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Stru
 - **Zero-Copy Data Plane**: Uses the **Arrow C Data Interface** (FFI) for direct memory transfer between Rust and JVM.
 - **Strictly At-Least-Once**: Native Reservoirs with background deadline management prevent message expiry.
 - **Multi-Spark Version Support**: Native binary portability across Spark 3.3, 3.5, and 4.0.
+- **Improved Reliability**: Safe JNI bridge with panic protection and thread-safe logging.
 
 ## 📚 Documentation
 
-Detailed documentation is available in the `docs/` directory:
+The documentation has been consolidated into three core guides:
 
-- [**Configuration**](docs/configuration.md): Detailed reference for all reader/writer options.
-- [**Development**](docs/development.md): How to build, test, and lint the connector.
-- [**Troubleshooting**](docs/troubleshooting.md): Log patterns, common errors, and debugging guide.
-- [**Architecture**](docs/architecture/system_architecture.md): Deep dive into the system design.
+- [**Architecture**](ARCHITECTURE.md): Deep dive into system design, JNI engineering, and safety patterns.
+- [**Development & Operations**](DEVELOPMENT.md): Build instructions, configuration reference, and troubleshooting.
+- [**Roadmap**](ROADMAP.md): Future objectives (multi-arch, metrics, performance offloading).
 
 ## ⚡ Quick Start
 

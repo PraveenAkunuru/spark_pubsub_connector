@@ -57,7 +57,11 @@ pub unsafe extern "C" fn noop_release_array(_array: *mut FFI_ArrowArray) {}
 /// This is a no-op release function for Arrow FFI. It does not free any memory.
 pub unsafe extern "C" fn noop_release_schema(_schema: *mut FFI_ArrowSchema) {}
 
-/// Helper for panic safety in JNI calls
+/// Helper for panic safety in JNI calls.
+/// 
+/// This wrapper catches any panics that occur during the execution of the closure `f`,
+/// logs the error details, and returns a default `error_val`.
+/// This is critical for preventing Rust panics from crashing the JVM.
 fn safe_jni_call<R, F>(error_val: R, f: F) -> R
 where
     F: FnOnce() -> R + std::panic::UnwindSafe,
@@ -72,9 +76,13 @@ where
             } else {
                 "Panic occurred (unknown cause)".to_string()
             };
-            log::error!("Rust: Panic in JNI call: {}", msg);
+            
+            // Try to get backtrace if available
+            let backtrace = std::backtrace::Backtrace::capture();
+            log::error!("Rust: Panic in JNI call: {}\nBacktrace: {:?}", msg, backtrace);
+            
             // Also try eprintln if logging failed or panic was related to logging
-            eprintln!("Rust: Panic in JNI call: {}", msg);
+            eprintln!("Rust: Panic in JNI call: {}\nBacktrace: {:?}", msg, backtrace);
             error_val
         }
     }
@@ -537,16 +545,28 @@ mod jni {
 
 
 /// Internal state for a Spark partition reader, including its dedicated Tokio runtime.
+/// 
+/// This struct holds the resources needed to pull messages from Pub/Sub and convert them
+/// to Arrow batches. It is maintained in Rust memory and referenced by Spark via a raw pointer.
 pub struct RustPartitionReader {
+    /// Dedicated Tokio runtime for async I/O.
     rt: Runtime,
+    /// Pub/Sub client instance.
     client: PubSubClient,
+    /// Optional Arrow schema for structured parsing.
     schema: Option<arrow::datatypes::SchemaRef>,
+    /// Format of the data in Pub/Sub (JSON or Avro).
     format: crate::arrow_convert::DataFormat,
+    /// Optional Avro schema for Avro parsing.
     avro_schema: Option<apache_avro::Schema>,
 }
 
 /// Internal state for a Spark partition writer, including its dedicated Tokio runtime.
+/// 
+/// This struct holds the resources needed to publish messages to Pub/Sub.
 pub struct RustPartitionWriter {
+    /// Dedicated Tokio runtime for async I/O.
     rt: Runtime,
+    /// Pub/Sub publisher client instance.
     client: crate::pubsub::PublisherClient,
 }

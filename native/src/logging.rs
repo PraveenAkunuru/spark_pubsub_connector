@@ -1,13 +1,22 @@
+//! # Native JNI Logging Bridge
+//!
+//! This module provides a `log` facade implementation that forwards Rust logs
+//! back to Spark's `NativeLogger` using the JNI.
+//!
+//! It uses a background thread and a multi-producer single-consumer (MPSC) channel
+//! to decouple Rust execution from JNI/JVM latency.
+
 use jni::objects::AutoLocal;
 use jni::JavaVM;
 use log::{Level, Log, Metadata, Record};
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 use std::thread;
 use tokio::sync::mpsc;
 
 static INIT: Once = Once::new();
-static mut SENDER: Option<mpsc::Sender<(Level, String)>> = None;
+static SENDER: OnceLock<mpsc::Sender<(Level, String)>> = OnceLock::new();
 
+/// Logger implementation that sends records to a background JNI thread.
 struct JniLogger;
 
 impl Log for JniLogger {
@@ -17,11 +26,9 @@ impl Log for JniLogger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            unsafe {
-                if let Some(tx) = &*std::ptr::addr_of!(SENDER) {
-                    // Use try_send to avoid blocking if the channel is full
-                    let _ = tx.try_send((record.level(), record.args().to_string()));
-                }
+            if let Some(tx) = SENDER.get() {
+                // Use try_send to avoid blocking if the channel is full
+                let _ = tx.try_send((record.level(), record.args().to_string()));
             }
         }
     }
@@ -30,13 +37,14 @@ impl Log for JniLogger {
 }
 
 /// Initialize the JNI Logger.
-/// Spawns a background thread that attaches to the JVM and calls NativeLogger.log().
+/// Spawns a background thread that attaches to the JVM and calls `NativeLogger.log()`.
 pub fn init(vm: JavaVM) {
     INIT.call_once(|| {
         let (tx, mut rx) = mpsc::channel::<(Level, String)>(10000);
 
-        unsafe {
-            SENDER = Some(tx);
+        if SENDER.set(tx).is_err() {
+            eprintln!("Rust Logging: Failed to set SENDER OnceLock");
+            return;
         }
 
         log::set_logger(&JniLogger).unwrap();

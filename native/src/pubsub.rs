@@ -172,6 +172,9 @@ impl PubSubClient {
     }
 
     /// Drains up to `batch_size` messages from the internal buffer.
+    /// 
+    /// This method waits for up to 3 seconds for messages to arrive. If the buffer is empty
+    /// and the background task is still alive, it returns an empty vector.
     /// Returns an error if the receiver channel is closed (background task died).
     pub async fn fetch_batch(&mut self, batch_size: usize) -> Result<Vec<ReceivedMessage>, String> {
         let mut batch = Vec::with_capacity(batch_size);
@@ -186,7 +189,7 @@ impl PubSubClient {
                      if batch.is_empty() {
                          return Err("Background task died".to_string());
                      }
-                     break; // Return functionality partial batch
+                     break; // Return partial batch if we have any
                  },
                  Err(_) => break, // timeout
              }
@@ -195,6 +198,9 @@ impl PubSubClient {
     }
     
     /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
+    /// 
+    /// This is an asynchronous operation that merely sends the IDs to the background task.
+    /// It does not wait for the server to confirm receipt.
     pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::debug!("Rust: Sending ack request for {} ids", ack_ids.len());
         if ack_ids.is_empty() {
@@ -399,6 +405,8 @@ impl PublisherClient {
     }
     
     /// Publishes a batch of messages to the configured topic in a single gRPC request.
+    /// 
+    /// This method queues the batch for the background thread to handle.
     pub async fn publish_batch(&mut self, messages: Vec<PubsubMessage>) -> Result<(), Box<dyn std::error::Error>> {
         if messages.is_empty() {
              return Ok(());
@@ -408,6 +416,8 @@ impl PublisherClient {
     }
     
     /// Flushes all pending messages by sending a Flush command and waiting for it to be processed.
+    /// 
+    /// This method blocks (asynchronously) until all previously queued messages have been attempted.
     pub async fn flush(&self, timeout: Duration) -> Result<(), String> {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {

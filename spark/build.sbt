@@ -2,6 +2,14 @@ name := "spark-pubsub-connector-root"
 
 version := "0.1.0"
 
+lazy val root = (project in file("."))
+  .aggregate(spark33, spark35, spark40)
+  .settings(
+    publish / skip := true,
+    Compile / sources := Seq.empty,
+    Test / sources := Seq.empty
+  )
+
 lazy val javaOpts = Seq(
   "-DRUST_BACKTRACE=1",
   "--add-opens=java.base/java.lang=ALL-UNNAMED",
@@ -141,7 +149,8 @@ lazy val spark40 = (project in file("spark40"))
       "com.fasterxml.jackson.core" % "jackson-core" % "2.17.2",
       "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.17.2",
       "io.netty" % "netty-all" % "4.1.110.Final",
-      "io.netty" % "netty-transport-native-epoll" % "4.1.110.Final"
+      "io.netty" % "netty-transport-native-epoll" % "4.1.110.Final",
+      "com.github.luben" % "zstd-jni" % "1.5.6-5"
     ),
     Compile / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "scala",
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",

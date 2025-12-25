@@ -3,7 +3,6 @@ package com.google.cloud.spark.pubsub
 import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.util.PubSubArrowUtils
 import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, Data}
@@ -20,34 +19,12 @@ abstract class PubSubPartitionReaderBase[T](
   protected val reader = new NativeReader()
   logInfo(s"PubSubPartitionReader created for ${partition.subscriptionId}")
 
-  protected val schemaJson: String = {
-    import org.apache.spark.sql.types._
-    val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
-    val rootArgs = mapper.createObjectNode()
-
-    val columnsArr = mapper.createArrayNode()
-    schema.fields.foreach { field =>
-      val fieldObj = mapper.createObjectNode()
-      fieldObj.put("name", field.name)
-      val typeName = field.dataType match {
-        case StringType => "string"
-        case IntegerType => "int"
-        case LongType => "long"
-        case BooleanType => "boolean"
-        case FloatType => "float"
-        case DoubleType => "double"
-        case _ => "string" // Fallback
-      }
-      fieldObj.put("type", typeName)
-      columnsArr.add(fieldObj)
-    }
-    rootArgs.set("columns", columnsArr)
-
-    partition.format.foreach(f => rootArgs.put("format", f))
-    partition.avroSchema.foreach(s => rootArgs.put("avroSchema", s))
-
-    mapper.writeValueAsString(rootArgs)
-  }
+  /** JSON-serialized configuration for the native data plane. */
+  protected val schemaJson: String = PubSubConfig.buildProcessingConfigJson(
+    schema, 
+    partition.format, 
+    partition.avroSchema
+  )
 
   protected val nativePtr: Long = reader.init(
     partition.projectId, 
