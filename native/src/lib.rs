@@ -497,12 +497,6 @@ mod jni {
                     
                     let array = StructArray::from(array_data);
                     
-                    // DEBUG: Drop array immediately and return success to test FFI cleanup.
-                    // If this passes, FFI is fine.
-                    drop(array);
-                    return 1;
-
-                    /*
                     // Convert to PubsubMessages
                     let reader = crate::arrow_convert::ArrowBatchReader::new(&array);
                     let msgs = match reader.to_pubsub_messages() {
@@ -522,7 +516,6 @@ mod jni {
                         return -4;
                     }
                     1
-                    */
                 }
             });
 

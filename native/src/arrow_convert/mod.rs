@@ -10,11 +10,12 @@ pub mod builder;
 pub mod reader;
 
 pub use builder::ArrowBatchBuilder;
+pub use reader::ArrowBatchReader;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, BinaryArray, StringArray};
+    use arrow::array::{Array, BinaryArray};
     use google_cloud_googleapis::pubsub::v1::{PubsubMessage, ReceivedMessage};
 
     #[test]

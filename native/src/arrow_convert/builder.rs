@@ -296,7 +296,7 @@ impl ArrowBatchBuilder {
             // The connector usually appends metadata columns?
             // If user schema has "name", "age", do we return "message_id", ..., "name", "age"?
             // Yes, typically.
-            // But we need to ensure the order matches what Spark expects?
+            // But we need to ensure the order matches what Spark expects.
             // Spark expects columns by name if possible, or position.
             // Let's append user arrays at the end.
 
@@ -317,7 +317,7 @@ impl ArrowBatchBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, BinaryArray, StringArray, TimestampMicrosecondArray};
+    use arrow::array::{Array, BinaryArray};
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 
     #[test]

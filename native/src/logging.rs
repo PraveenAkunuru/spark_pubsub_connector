@@ -18,7 +18,7 @@ impl Log for JniLogger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             unsafe {
-                if let Some(tx) = &SENDER {
+                if let Some(tx) = &*std::ptr::addr_of!(SENDER) {
                     // Use try_send to avoid blocking if the channel is full
                     let _ = tx.try_send((record.level(), record.args().to_string()));
                 }

@@ -140,16 +140,14 @@ impl<'a> ArrowBatchReader<'a> {
                     "".to_string()
                 };
 
-                // Extract explicit attributes (Map<String, String>)
+                // Extract explicit attributes
                 let mut attributes = HashMap::new();
-                if let Some(attr_val) = row.remove("attributes") {
-                    if let Value::Object(map) = attr_val {
-                        for (k, v) in map {
-                            if let Some(s) = v.as_str() {
-                                attributes.insert(k, s.to_string());
-                            } else {
-                                attributes.insert(k, v.to_string());
-                            }
+                if let Some(Value::Object(map)) = row.remove("attributes") {
+                    for (k, v) in map {
+                        if let Some(s) = v.as_str() {
+                            attributes.insert(k, s.to_string());
+                        } else {
+                            attributes.insert(k, v.to_string());
                         }
                     }
                 }
