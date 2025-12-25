@@ -58,7 +58,10 @@ object ExecutorDiag {
                val root = Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
                val count = root.getRowCount
                root.close()
-               s"Success: ptr=$ptr, getNextBatch=$batchRes, rowCount=$count"
+               
+               // Verify Acknowledgment
+               val ackRes = reader.ackCommitted(ptr, java.util.Collections.singletonList("batch-diag"))
+               s"Success: ptr=$ptr, getNextBatch=$batchRes, rowCount=$count, ackRes=$ackRes"
             } else {
                s"Success: ptr=$ptr, getNextBatch=$batchRes (empty)"
             }

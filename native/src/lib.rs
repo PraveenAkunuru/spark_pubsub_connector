@@ -118,7 +118,6 @@ mod jni {
             crate::safe_jni_call(0, || {
                 // Initialize JNI logging (safe to call multiple times)
                 crate::logging::init(env);
-                println!("Rust Raw: NativeReader.init called for project: {}", project_id);
                 log::info!("Rust: NativeReader.init called for project: {}", project_id);
 
                 if jitter_millis > 0 {
@@ -171,7 +170,6 @@ mod jni {
                     },
                     Err(e) => {
                         log::error!("Rust: Failed to create Pub/Sub client: {:?}", e);
-                        println!("Rust Raw: Failed to create Pub/Sub client for project {}, sub {}: {:?}", project_id, subscription_id, e);
                         eprintln!("Rust: Failed to create Pub/Sub client for project {}, sub {}: {:?}", project_id, subscription_id, e);
                         0
                     }

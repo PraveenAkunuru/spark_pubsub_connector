@@ -59,7 +59,7 @@ impl PubSubClient {
         log::info!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
         let (channel, header_val) = create_channel_and_header().await?;
 
-        let full_sub_name = if subscription_id.contains('/') {
+        let full_sub_name = if subscription_id.contains("/subscriptions/") {
             subscription_id.to_string()
         } else {
             format!("projects/{}/subscriptions/{}", project_id, subscription_id)
@@ -76,14 +76,11 @@ impl PubSubClient {
         let check_req = google_cloud_googleapis::pubsub::v1::GetSubscriptionRequest {
             subscription: full_sub_name.clone(),
         };
-        println!("Rust Raw: Validating subscription: {}", full_sub_name);
         match client.get_subscription(Request::new(check_req)).await {
             Ok(_) => {
-                println!("Rust Raw: Subscription validated: {}", full_sub_name);
                 log::info!("Rust: Subscription validated: {}", full_sub_name);
             },
             Err(e) => {
-                println!("Rust Raw: Subscription validation failed: {:?}", e);
                 log::error!("Rust: Subscription validation failed: {:?}", e);
                 return Err(Box::new(e));
             }
@@ -345,9 +342,7 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
             }
             endpoint_builder = endpoint_builder.tls_config(tls_config)?;
         }
-        println!("Rust Raw: Connecting to gRPC endpoint: {}", endpoint);
         let ch = endpoint_builder.connect().await?;
-        println!("Rust Raw: Connected to gRPC endpoint: {}", endpoint);
         let mut pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
         pool.insert(endpoint, ch.clone());
         ch
@@ -356,11 +351,13 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     let header_val = if emulator_host.is_some() {
         None
     } else {
-        let mut config = google_cloud_auth::project::Config::default();
-        config.scopes = Some(&[
-            "https://www.googleapis.com/auth/cloud-platform",
-            "https://www.googleapis.com/auth/pubsub"
-        ]);
+        let config = google_cloud_auth::project::Config {
+            scopes: Some(&[
+                "https://www.googleapis.com/auth/cloud-platform",
+                "https://www.googleapis.com/auth/pubsub"
+            ]),
+            ..Default::default()
+        };
         let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
         let token_source = ts.token_source();
         let token = token_source.token().await?;
@@ -368,13 +365,16 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
         log::info!("Rust Auth: Acquired token (length: {}, prefix: {})", 
             token.len(), 
             if token.len() > 10 { &token[..10] } else { "short" });
-        println!("Rust Raw: Acquired token (len={})", token.len());
 
-        let val = MetadataValue::from_str(&format!("Bearer {}", token))?;
+        let header_string = if token.starts_with("Bearer ") {
+            token
+        } else {
+            format!("Bearer {}", token)
+        };
+        let val = MetadataValue::from_str(&header_string)?;
         Some(val)
     };
 
-    println!("Rust Raw: create_channel_and_header success");
     Ok((channel, header_val))
 }
 
