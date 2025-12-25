@@ -17,12 +17,23 @@ object PubSubArrowUtils {
     // So expected is 1?
     try {
         // Try with 4 arguments (Spark 3.4/3.5 signature)
-        ArrowUtils.toArrowSchema(schema, "UTC", true, false).toJson()
+      ArrowUtils.toArrowSchema(schema, "UTC", true, false).toJson()
     } catch {
         case _: Throwable =>
-           // Fallback or retry with different signature if needed
-           // For now, assume the error message was correct about 4 args.
-           throw new RuntimeException("Failed to call ArrowUtils.toArrowSchema (signature mismatch?)")
+           throw new RuntimeException("Failed to call ArrowUtils.toArrowSchema")
+    }
+  }
+
+  def getValue(vector: org.apache.arrow.vector.ValueVector, ordinal: Int): Any = {
+    if (vector.isNull(ordinal)) return null
+    val value = vector.getObject(ordinal)
+    value match {
+      case t: org.apache.arrow.vector.util.Text => org.apache.spark.unsafe.types.UTF8String.fromString(t.toString)
+      case s: String => org.apache.spark.unsafe.types.UTF8String.fromString(s)
+      case other => other
     }
   }
 }
+
+
+

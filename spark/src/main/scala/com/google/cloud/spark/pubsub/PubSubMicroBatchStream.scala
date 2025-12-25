@@ -141,45 +141,17 @@ class PubSubPartitionReaderFactory(schema: StructType) extends PartitionReaderFa
  * 3. **Acknowledgment Buffer**: Tracking message IDs for At-Least-Once delivery.
  */
 class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType) 
-  extends PartitionReader[InternalRow] with org.apache.spark.internal.Logging {
+  extends PubSubPartitionReaderBase[InternalRow](partition, schema) {
   
   import org.apache.spark.sql.util.PubSubArrowUtils
-  private val reader = new NativeReader()
-  logInfo(s"PubSubPartitionReader created for ${partition.subscriptionId}")
   
-  private val schemaJson = try {
-     PubSubArrowUtils.toArrowSchema(schema)
-  } catch {
-     case e: Exception => 
-       logWarning(s"Failed to convert schema to Arrow JSON: ${e.getMessage}. Using raw mode.")
-       ""
-  }
-
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis, schemaJson)
-  if (nativePtr == 0) {
-    throw new RuntimeException("Failed to initialize native Pub/Sub client.")
-  }
-  
-  private val allocator = new org.apache.arrow.memory.RootAllocator()
-  
-  import scala.collection.JavaConverters._
   private var currentBatch: java.util.Iterator[InternalRow] = java.util.Collections.emptyIterator()
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
-
-  /**
-   * Advances the reader to the next row. Fetches a new batch from native if the current batch is exhausted.
-   */
-  // Perform committed Acks from signal propagation
-  if (partition.committedBatchIds.nonEmpty) {
-    logInfo(s"Task: Propagation signal received. Flushing committed batches: ${partition.committedBatchIds.mkString(", ")}")
-    reader.ackCommitted(nativePtr, partition.committedBatchIds.asJava)
-  }
 
   override def next(): Boolean = {
     if (currentBatch.hasNext) return true
     fetchNextBatch()
   }
-
 
   private def fetchNextBatch(): Boolean = {
     if (currentVectorSchemaRoot != null) {
@@ -187,20 +159,12 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
       currentVectorSchemaRoot = null
     }
 
-    // Allocate Arrow structures fresh per batch as they are owned by VectorSchemaRoot after import
-    val arrowArray = org.apache.arrow.c.ArrowArray.allocateNew(allocator)
-    val arrowSchema = org.apache.arrow.c.ArrowSchema.allocateNew(allocator)
-    
-    try {
-      val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
-      
-      if (result > 0) {
-        val root = org.apache.arrow.c.Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
+    fetchNativeBatch() match {
+      case Some(root) =>
         currentVectorSchemaRoot = root
-        
         val rowCount = root.getRowCount
         
-        // 2. Project to requested Schema
+        // Project to requested Schema
         val fieldVectors = schema.fields.map { field =>
           root.getVector(field.name)
         }
@@ -209,7 +173,7 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
           val values = fieldVectors.indices.map { j =>
             val vec = fieldVectors(j)
             if (vec != null) {
-               ArrowUtils.getValue(vec, i)
+               org.apache.spark.sql.util.PubSubArrowUtils.getValue(vec, i)
             } else {
                null
             }
@@ -219,35 +183,20 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
         
         currentBatch = rows.toIterator.asJava
         currentBatch.hasNext
-      } else if (result == 0) {
-        arrowArray.close()
-        arrowSchema.close()
+        
+      case None =>
         false
-      } else {
-        arrowArray.close()
-        arrowSchema.close()
-        throw new RuntimeException(s"NativeReader.getNextBatch failed with code $result")
-      }
-    } catch {
-      case e: Exception =>
-        arrowArray.close()
-        arrowSchema.close()
-        throw e
     }
   }
 
   override def get(): InternalRow = currentBatch.next()
 
-  /**
-   * Finalizes the task.
-   */
   override def close(): Unit = {
     if (currentVectorSchemaRoot != null) {
       currentVectorSchemaRoot.close()
       currentVectorSchemaRoot = null
     }
-    reader.close(nativePtr)
-    allocator.close()
+    super.close()
   }
 }
 
@@ -255,25 +204,11 @@ class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType)
  * Columnar version of the reader that stays in Arrow memory without intermediate heap conversions.
  */
 class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: StructType)
-  extends PartitionReader[ColumnarBatch] with org.apache.spark.internal.Logging {
+  extends PubSubPartitionReaderBase[ColumnarBatch](partition, schema) {
 
-  import org.apache.spark.sql.util.PubSubArrowUtils
-  private val reader = new NativeReader()
-  private val schemaJson = try {
-     PubSubArrowUtils.toArrowSchema(schema)
-  } catch {
-     case _: Exception => ""
-  }
-  private val nativePtr = reader.init(partition.projectId, partition.subscriptionId, partition.jitterMillis, schemaJson)
-  private val allocator = new org.apache.arrow.memory.RootAllocator()
   private var currentBatch: ColumnarBatch = _
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
   private var isExhausted = false
-
-  if (partition.committedBatchIds.nonEmpty) {
-    import scala.collection.JavaConverters._
-    reader.ackCommitted(nativePtr, partition.committedBatchIds.asJava)
-  }
 
   override def next(): Boolean = {
     if (isExhausted) return false
@@ -283,35 +218,18 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
       currentVectorSchemaRoot = null
     }
 
-    val arrowArray = org.apache.arrow.c.ArrowArray.allocateNew(allocator)
-    val arrowSchema = org.apache.arrow.c.ArrowSchema.allocateNew(allocator)
-    
-    try {
-      val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
-      if (result > 0) {
-        val root = org.apache.arrow.c.Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
+    fetchNativeBatch() match {
+      case Some(root) =>
         currentVectorSchemaRoot = root
-        
         val columnarVectors = schema.fields.map { field =>
           new ArrowColumnVector(root.getVector(field.name))
         }
         currentBatch = new ColumnarBatch(columnarVectors.toArray, root.getRowCount)
         true
-      } else if (result == 0) {
-        arrowArray.close()
-        arrowSchema.close()
+        
+      case None =>
         isExhausted = true
         false
-      } else {
-        arrowArray.close()
-        arrowSchema.close()
-        throw new RuntimeException(s"NativeReader.getNextBatch failed with code $result")
-      }
-    } catch {
-      case e: Exception =>
-        arrowArray.close()
-        arrowSchema.close()
-        throw e
     }
   }
 
@@ -321,8 +239,7 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
     if (currentVectorSchemaRoot != null) {
       currentVectorSchemaRoot.close()
     }
-    reader.close(nativePtr)
-    allocator.close()
+    super.close()
   }
 }
 

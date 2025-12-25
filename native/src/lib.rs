@@ -57,6 +57,21 @@ pub unsafe extern "C" fn noop_release_array(_array: *mut FFI_ArrowArray) {}
 /// This is a no-op release function for Arrow FFI. It does not free any memory.
 pub unsafe extern "C" fn noop_release_schema(_schema: *mut FFI_ArrowSchema) {}
 
+/// Helper for panic safety in JNI calls
+fn safe_jni_call<R, F>(error_val: R, f: F) -> R
+where
+    F: FnOnce() -> R + std::panic::UnwindSafe,
+{
+    match std::panic::catch_unwind(f) {
+        Ok(res) => res,
+        Err(_) => {
+            log::error!("Rust: Panic occurred in JNI call");
+            error_val
+        }
+    }
+}
+
+
 #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #[bridge]
 mod jni {
@@ -84,7 +99,7 @@ mod jni {
         /// Initializes a new `PubSubClient` with the given project and subscription.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
         pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String) -> jlong {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(0, || {
                 // Initialize logging (safe to call multiple times)
                 if let Ok(vm) = env.get_java_vm() {
                     crate::logging::init(vm);
@@ -142,15 +157,7 @@ mod jni {
                         0
                     }
                 }
-            });
-
-            match result {
-                Ok(ptr) => ptr,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeReader.init");
-                    0
-                }
-            }
+            })
         }
 
         /// Fetches the next batch of messages from the background queue, converts them to an Arrow batch,
@@ -160,7 +167,7 @@ mod jni {
         /// and exports them directly into the memory addresses provided by Spark (out_array, out_schema).
         /// Returns 1 if a batch was produced, 0 if no messages are available, or a negative error code.
         pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, out_array: jlong, out_schema: jlong) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(-100, || {
                 if reader_ptr == 0 {
                     return -1;
                 }
@@ -226,15 +233,7 @@ mod jni {
                 }
                 
                 1
-            });
-
-            match result {
-                Ok(res) => res,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeReader.getNextBatch");
-                    -100
-                }
-            }
+            })
         }
 
         // Removed storeAcksFromArrow because ack storage is now integrated into getNextBatch
@@ -242,7 +241,7 @@ mod jni {
         /// Sends an asynchronous Acknowledgment request for a list of message IDs.
         /// This is used for "At-Least-Once" delivery guarantees in Spark.
         pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids: Vec<String>) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(0, || {
                 if reader_ptr == 0 {
                     return -1;
                 }
@@ -259,20 +258,12 @@ mod jni {
                         0
                     }
                 }
-            });
-
-            match result {
-                Ok(res) => res,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeReader.acknowledge");
-                    -100
-                }
-            }
+            })
         }
 
         /// Flushes the native reservoir for the given committed batches.
         pub extern "jni" fn ackCommitted(self, _env: &JNIEnv, reader_ptr: jlong, batch_ids: Vec<String>) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(-100, || {
                 if reader_ptr == 0 || batch_ids.is_empty() { return 1; }
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
                 
@@ -297,19 +288,11 @@ mod jni {
                 });
                 
                 if res.is_ok() { 1 } else { 0 }
-            });
-
-            match result {
-                Ok(res) => res,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeReader.ackCommitted");
-                    -100
-                }
-            }
+            })
         }
 
         pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(-1, || {
                 let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                 let mut count = 0;
                 for (_batch, subs) in reservoir.iter() {
@@ -318,22 +301,17 @@ mod jni {
                     }
                 }
                 count as i32
-            });
-
-            match result {
-                Ok(c) => c,
-                Err(_) => -1,
-            }
+            })
         }
 
         /// Destroys the `RustPartitionReader` and shuts down its Tokio runtime.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
-            let _ = std::panic::catch_unwind(|| {
+            crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
                     let _reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
                     // Runtime will be dropped here, shutting down connections
                 }
-            });
+            })
         }
     }
 
@@ -350,7 +328,7 @@ mod jni {
         /// Initializes a new `PublisherClient` with the given project and topic.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionWriter`.
         pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String) -> jlong {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(0, || {
                 // Guideline 4: Staggered Initialization
                 // Initialize logging (safe to call multiple times)
                 if let Ok(vm) = _env.get_java_vm() {
@@ -381,21 +359,13 @@ mod jni {
                         0
                     }
                 }
-            });
-
-            match result {
-                Ok(ptr) => ptr,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeWriter.init");
-                    0
-                }
-            }
+            })
         }
 
         /// Takes an Arrow batch from Spark via its C memory addresses, converts it to Pub/Sub messages,
         /// and publishes them to the configured topic.
         pub extern "jni" fn writeBatch(self, _env: &JNIEnv, writer_ptr: jlong, arrow_array_addr: jlong, arrow_schema_addr: jlong) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(-100, || {
                 if writer_ptr == 0 {
                     return -1;
                 }
@@ -517,21 +487,13 @@ mod jni {
                     }
                     1
                 }
-            });
-
-            match result {
-                Ok(res) => res,
-                Err(_) => {
-                    log::error!("Rust: Panic occurred during NativeWriter.writeBatch");
-                    -100
-                }
-            }
+            })
         }
 
 
 
         pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong) -> i32 {
-            let result = std::panic::catch_unwind(|| {
+            crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
                     let writer = unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
                     // Flush before dropping (which kills the runtime)
@@ -546,15 +508,7 @@ mod jni {
                     return flush_res;
                 }
                 0
-            });
-            
-            match result {
-                Ok(code) => code,
-                Err(_) => {
-                    log::error!("Rust: Panic during writer close");
-                    -99
-                }
-            }
+            })
         }
     }
 }
