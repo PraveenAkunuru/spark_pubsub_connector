@@ -40,8 +40,23 @@ class PubSubTableProvider extends TableProvider with DataSourceRegister with org
    * Returns a `PubSubTable` instance configured with the given schema and properties.
    */
   override def getTable(schema: StructType, partitioning: Array[Transform], properties: util.Map[String, String]): Table = {
-    val subId = properties.getOrDefault("subscriptionId", "unknown")
-    logInfo(s"Creating PubSubTable for subscription: $subId")
+    val subId = properties.get("subscriptionId")
+    if (subId == null || subId.trim.isEmpty) {
+      // Validate write (topicId) or read (subscriptionId)?
+      // getTable is generic. 
+      // Spark V2 doesn't technically distinguish read/write intent at getTable time perfectly, 
+      // but usually we can check context or just be lenient?
+      // Actually, if we require EITHER subscriptionId OR topicId?
+      // But for READ, we need subscriptionId.
+      // Let's check for EITHER.
+      val topicId = properties.get("topicId")
+      if (topicId == null || topicId.trim.isEmpty) {
+         throw new IllegalArgumentException("Missing required option: Must provide either 'subscriptionId' (for read) or 'topicId' (for write).")
+      }
+    }
+    
+    val subIdEffective = properties.getOrDefault("subscriptionId", "unknown")
+    logInfo(s"Creating PubSubTable for subscription: $subIdEffective")
     new PubSubTable(schema, properties)
   }
 

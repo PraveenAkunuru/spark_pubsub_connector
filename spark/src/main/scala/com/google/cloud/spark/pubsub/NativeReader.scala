@@ -42,6 +42,11 @@ class NativeReader {
   @native def getUnackedCount(readerPtr: Long): Int
 
   /**
+   * Returns the estimated size (bytes) of messages buffered in the native layer.
+   */
+  @native def getNativeMemoryUsage(): Long
+
+  /**
    * Shuts down the native client and releases associated resources (runtime, connections).
    */
   @native def close(readerPtr: Long): Unit

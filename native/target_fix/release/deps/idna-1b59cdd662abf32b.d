@@ -1,0 +1,10 @@
+/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target_fix/release/deps/libidna-1b59cdd662abf32b.rmeta: /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/lib.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/deprecated.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/punycode.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/uts46.rs
+
+/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target_fix/release/deps/libidna-1b59cdd662abf32b.rlib: /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/lib.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/deprecated.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/punycode.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/uts46.rs
+
+/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target_fix/release/deps/idna-1b59cdd662abf32b.d: /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/lib.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/deprecated.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/punycode.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/uts46.rs
+
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/lib.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/deprecated.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/punycode.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/idna-1.1.0/src/uts46.rs:

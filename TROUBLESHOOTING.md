@@ -24,6 +24,16 @@ Apache Spark 3.5+ on Dataproc 2.2+ runs on Java 17. Because this connector uses 
 
 **Add these flags to your `spark-submit` command or `spark-defaults.conf`:**
 
+**Simplest method (recommended):**
+Use the provided helper script to generate the flags:
+
+```bash
+export SPARK_SUBMIT_OPTS="$(./scripts/generate_spark_flags.sh)"
+spark-submit ...
+```
+
+**Or manually:**
+
 ```bash
 --conf "spark.driver.extraJavaOptions=\
   --add-opens=java.base/java.nio=ALL-UNNAMED \

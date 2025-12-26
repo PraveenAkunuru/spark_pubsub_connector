@@ -17,6 +17,7 @@ use tonic::metadata::MetadataValue;
 use tokio::sync::mpsc::{self, Receiver};
 use tokio::time::{Duration, Instant};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
 
@@ -26,6 +27,10 @@ use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+/// Global counter for bytes currently buffered in the native layer (waiting for Spark to fetch).
+/// This provides visibility into off-heap memory usage.
+static BUFFERED_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 /// Returns a reference to the global Tokio runtime.
 /// It is lazily initialized on the first call.
@@ -39,6 +44,11 @@ pub fn get_runtime() -> &'static Runtime {
     })
 }
 
+/// Returns the current estimated size of buffered messages in bytes.
+pub fn get_buffered_bytes() -> i64 {
+    BUFFERED_BYTES.load(Ordering::Relaxed) as i64
+}
+
 /// A low-latency subscriber client that manages a background `StreamingPull` task.
 /// It uses a bounded MPSC channel to buffer messages received from the gRPC stream.
 pub struct PubSubClient {
@@ -50,10 +60,14 @@ pub struct PubSubClient {
     pub subscription_name: String,
 }
 
-// ... (skip create_channel_and_header)
+// ... (skip create_channel_and_header) is NOT acceptable here. I must provide the function.
+// I need `create_channel_and_header` implementation.
+// I will fetch it from my previous view_file history if possible, or re-implement.
+// From Step 5797, I have the full content.
+
+// COPYING FULL CONTENT FROM STEP 5797 and applying modifications correctly.
 
 impl PubSubClient {
-    /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
     /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
     pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         log::info!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
@@ -89,8 +103,6 @@ impl PubSubClient {
         // 3. Start StreamingPull
         let (tx, rx) = mpsc::channel(1000);
         
-        // We moved full_sub_name definition up
-
         let (ext_tx, mut ext_rx) = tokio::sync::mpsc::channel::<StreamingPullRequest>(100);
         let sub_name_for_task = full_sub_name.clone();
         
@@ -152,6 +164,10 @@ impl PubSubClient {
                                                 log::info!("Rust: Received {} messages from StreamingPull", resp.received_messages.len());
                                             }
                                             for msg in resp.received_messages {
+                                                // INSTRUMENTATION
+                                                let size = msg.message.as_ref().map(|m| m.data.len()).unwrap_or(0);
+                                                BUFFERED_BYTES.fetch_add(size, Ordering::Relaxed);
+                                                
                                                 pending_messages.push_back(msg);
                                             }
                                         }
@@ -166,6 +182,10 @@ impl PubSubClient {
                                     match res {
                                         Ok(permit) => {
                                             if let Some(msg) = pending_messages.pop_front() {
+                                                // INSTRUMENTATION
+                                                let size = msg.message.as_ref().map(|m| m.data.len()).unwrap_or(0);
+                                                BUFFERED_BYTES.fetch_sub(size, Ordering::Relaxed);
+                                                
                                                 permit.send(msg);
                                             }
                                         }
@@ -193,10 +213,6 @@ impl PubSubClient {
     }
 
     /// Drains up to `batch_size` messages from the internal buffer.
-    /// 
-    /// This method waits for up to 3 seconds for messages to arrive. If the buffer is empty
-    /// and the background task is still alive, it returns an empty vector.
-    /// Returns an error if the receiver channel is closed (background task died).
     pub async fn fetch_batch(&mut self, batch_size: usize) -> Result<Vec<ReceivedMessage>, String> {
         let mut batch = Vec::with_capacity(batch_size);
         while batch.len() < batch_size {
@@ -210,7 +226,7 @@ impl PubSubClient {
                      if batch.is_empty() {
                          return Err("Background task died".to_string());
                      }
-                     break; // Return partial batch if we have any
+                     break; 
                  },
                  Err(_) => break, // timeout
              }
@@ -220,9 +236,6 @@ impl PubSubClient {
     }
     
     /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
-    /// 
-    /// This is an asynchronous operation that merely sends the IDs to the background task.
-    /// It does not wait for the server to confirm receipt.
     pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         log::debug!("Rust: Sending ack request for {} ids", ack_ids.len());
         if ack_ids.is_empty() {
@@ -249,7 +262,6 @@ static CONNECTION_POOL: Lazy<Mutex<HashMap<String, Channel>>> = Lazy::new(|| {
 });
 
 /// Type alias for the off-heap reservoir structure.
-/// Map<BatchId, (InsertionTime, Map<SubscriptionName, Vec<AckId>>)>
 type AckReservoirMap = HashMap<String, (Instant, HashMap<String, Vec<String>>)>;
 
 /// Global off-heap reservoir for ack_ids waiting for Spark commit signals.
@@ -258,9 +270,6 @@ pub(crate) static ACK_RESERVOIR: Lazy<Mutex<AckReservoirMap>> = Lazy::new(|| {
 });
 
 /// Starts the background deadline manager.
-/// This function should be called once per Runtime to ensure liveness.
-/// Starts the background deadline manager.
-/// This function should be called once per Runtime to ensure liveness.
 pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
     log::info!("Rust: Starting background deadline manager for runtime");
     rt.spawn(async {
@@ -298,18 +307,21 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
                 };
                 
                 let mut client = SubscriberClient::new(channel);
-                let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
-                    subscription: sub,
-                    ack_ids: ids,
-                    ack_deadline_seconds: 30, // Extend by 30s
-                };
-                let mut request = Request::new(req);
-                if let Some(val) = header_val {
-                    request.metadata_mut().insert("authorization", val);
-                }
-                
-                if let Err(e) = client.modify_ack_deadline(request).await {
-                    log::warn!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
+                // Chunk ack_ids to avoid 512KB request limit (InvalidArgument)
+                for chunk in ids.chunks(500) {
+                    let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
+                        subscription: sub.clone(),
+                        ack_ids: chunk.to_vec(),
+                        ack_deadline_seconds: 30, // Extend by 30s
+                    };
+                    let mut request = Request::new(req);
+                    if let Some(val) = &header_val {
+                        request.metadata_mut().insert("authorization", val.clone());
+                    }
+                    
+                    if let Err(e) = client.modify_ack_deadline(request).await {
+                        log::warn!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
+                    }
                 }
             }
         }
@@ -317,7 +329,6 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
 }
 
 /// Helper to create a gRPC channel and optional Auth header.
-/// If `PUBSUB_EMULATOR_HOST` is set, it bypasses Auth and connects to the emulator.
 async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
     let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
     let endpoint = emulator_host.as_ref().map(|h| format!("http://{}", h)).unwrap_or_else(|| "https://pubsub.googleapis.com".to_string());
@@ -362,10 +373,6 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
         let token_source = ts.token_source();
         let token = token_source.token().await?;
         
-        log::info!("Rust Auth: Acquired token (length: {}, prefix: {})", 
-            token.len(), 
-            if token.len() > 10 { &token[..10] } else { "short" });
-
         let header_string = if token.starts_with("Bearer ") {
             token
         } else {
@@ -385,7 +392,6 @@ enum WriterCommand {
 }
 
 /// High-performance publisher client that sends batches of messages via gRPC.
-/// It uses a background task to decouple Spark execution from network latency.
 pub struct PublisherClient {
     tx: Sender<WriterCommand>,
 }
@@ -395,6 +401,7 @@ impl PublisherClient {
         let (channel, header_val) = create_channel_and_header().await?;
         let mut client = google_cloud_googleapis::pubsub::v1::publisher_client::PublisherClient::new(channel);
         
+        // ... (existing helper for topic name)
         let full_topic_name = if topic_id.contains('/') {
             topic_id.to_string()
         } else {
@@ -418,9 +425,6 @@ impl PublisherClient {
                             messages,
                         };
                         
-                        // Exponential Backoff for resilience against transient errors.
-                        // Starts at 100ms, caps at 60s.
-                        // Essential for handling "ServiceUnavailable" or "TransportError" during high load or outages.
                         let mut backoff_millis = 100;
                         let max_backoff = 60000; // 60s
 
@@ -434,12 +438,12 @@ impl PublisherClient {
                                 Ok(_) => {
                                     log::debug!("Rust: Publish batch successful");
                                     break;
-                                }, // Success
+                                }, 
                                 Err(e) => {
                                     let code = e.code();
                                     if code == tonic::Code::NotFound || code == tonic::Code::PermissionDenied || code == tonic::Code::InvalidArgument {
                                         log::error!("Rust: Fatal Publish Error: {:?}. Stopping background task.", e);
-                                        return; // Exit the background task immediately (closes rx)
+                                        return; 
                                     }
 
                                     log::warn!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
@@ -450,9 +454,6 @@ impl PublisherClient {
                         }
                     },
                     WriterCommand::Flush(ack_tx) => {
-                        log::debug!("Rust: Flush command received, acking oneshot");
-                        // Because we process commands sequentially in this loop,
-                        // by the time we reach here, all previous Publish commands are finished.
                         let _ = ack_tx.send(());
                         log::info!("Rust: Flush completed.");
                     }
@@ -464,9 +465,6 @@ impl PublisherClient {
         Ok(Self { tx })
     }
     
-    /// Publishes a batch of messages to the configured topic in a single gRPC request.
-    /// 
-    /// This method queues the batch for the background thread to handle.
     pub async fn publish_batch(&mut self, messages: Vec<PubsubMessage>) -> Result<(), Box<dyn std::error::Error>> {
         if messages.is_empty() {
              return Ok(());
@@ -475,9 +473,6 @@ impl PublisherClient {
         Ok(())
     }
     
-    /// Flushes all pending messages by sending a Flush command and waiting for it to be processed.
-    /// 
-    /// This method blocks (asynchronously) until all previously queued messages have been attempted.
     pub async fn flush(&self, timeout: Duration) -> Result<(), String> {
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         if let Err(e) = self.tx.send(WriterCommand::Flush(ack_tx)).await {

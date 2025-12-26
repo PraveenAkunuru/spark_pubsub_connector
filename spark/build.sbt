@@ -67,8 +67,8 @@ lazy val commonSettings = Seq(
       if (!platformDir.exists()) platformDir.mkdirs()
       
       val extension = if (osName == "darwin") "dylib" else "so"
-      val libName = s"libnative_pubsub_connector.$extension"
-      val sourceFile = nativeTarget / libName
+      val libName = s"libnative_pubsub_connector_glibc_2_31.$extension"
+      val sourceFile = nativeTarget / s"libnative_pubsub_connector.$extension"
       
       if (sourceFile.exists()) {
         val destFile = platformDir / libName
@@ -104,15 +104,23 @@ lazy val spark33 = (project in file("spark33"))
     Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )
 
+lazy val assemblySettings = Seq(
+  assembly / assemblyMergeStrategy := {
+    case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+    case PathList("META-INF", xs @ _*) => MergeStrategy.discard
+    case x => MergeStrategy.first
+  }
+)
+
 lazy val spark35 = (project in file("spark35"))
   .settings(commonSettings)
   .settings(
     name := "spark-pubsub-connector-3.5",
     scalaVersion := "2.12.18",
     libraryDependencies ++= Seq(
-      "org.apache.spark" %% "spark-core" % "3.5.3",
-      "org.apache.spark" %% "spark-sql" % "3.5.3",
-      "org.apache.spark" %% "spark-catalyst" % "3.5.3",
+      "org.apache.spark" %% "spark-core" % "3.5.3" % "provided",
+      "org.apache.spark" %% "spark-sql" % "3.5.3" % "provided",
+      "org.apache.spark" %% "spark-catalyst" % "3.5.3" % "provided",
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",
@@ -131,6 +139,7 @@ lazy val spark35 = (project in file("spark35"))
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
     Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )
+  .settings(assemblySettings)
 
 lazy val spark40 = (project in file("spark40"))
   .settings(commonSettings)

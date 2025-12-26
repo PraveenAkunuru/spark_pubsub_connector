@@ -1,0 +1,8 @@
+/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target_fix/release/deps/libzerocopy_derive-a159366efa731d97.so: /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/lib.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/enum.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/ext.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/repr.rs
+
+/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target_fix/release/deps/zerocopy_derive-a159366efa731d97.d: /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/lib.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/enum.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/ext.rs /usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/repr.rs
+
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/lib.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/enum.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/ext.rs:
+/usr/local/google/home/pakunuru/.cargo/registry/src/index.crates.io-6f17d22bba15001f/zerocopy-derive-0.8.31/src/repr.rs:

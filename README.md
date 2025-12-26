@@ -65,3 +65,59 @@ To run this connector, you **must** allow native memory access. See [TROUBLESHOO
 
 ## 📄 License
 Licensed under **MIT-0**. See [LICENSE](LICENSE).
+
+## 🛠️ Common Commands Cheat Sheet
+
+For quick copy-paste during operations.
+
+### Environment Setup
+```bash
+# Generate Spark 3.5+ JVM Flags (Required for Native Access)
+export FLAGS=$(./scripts/generate_spark_flags.sh)
+```
+
+### Job Management (Dataproc)
+```bash
+# List Active Jobs
+gcloud dataproc jobs list --cluster cluster-aaf3 --region us-central1 --state-filter=active
+
+# Kill a Job
+gcloud dataproc jobs kill <JOB_ID> --cluster cluster-aaf3 --region us-central1 --quiet
+
+# Get Driver Output URI
+gcloud dataproc jobs describe <JOB_ID> --cluster cluster-aaf3 --region us-central1 --format="value(driverOutputResourceUri)"
+```
+
+### Build & Deploy
+```bash
+# clean and build native (use target_fix if permission issues occur)
+cd native && CARGO_TARGET_DIR=target_fix cargo build --release
+
+# clean and build spark jar
+cd spark && java -jar sbt-launch.jar clean assembly
+
+# upload jar
+gsutil cp target/scala-2.12/spark-pubsub-connector-assembly-0.1.0.jar gs://pakunuru-spark-pubsub-benchmark/jars/spark-pubsub-connector-latest.jar
+```
+
+### Submit Jobs (Templates)
+
+**Load Generator:**
+```bash
+gcloud dataproc jobs submit spark \
+    --cluster cluster-aaf3 --region us-central1 \
+    --class com.google.cloud.spark.pubsub.benchmark.PubSubLoadGenerator \
+    --jars gs://pakunuru-spark-pubsub-benchmark/jars/spark-pubsub-connector-latest.jar \
+    --properties "spark.driver.extraJavaOptions=$FLAGS,spark.executor.extraJavaOptions=$FLAGS,spark.driver.memory=4g,spark.jars.packages=org.apache.arrow:arrow-c-data:15.0.2,spark.pubsub.batchSize=1000" \
+    -- benchmark-throughput-1kb 1000000 1024
+```
+
+**Read Benchmark:**
+```bash
+gcloud dataproc jobs submit spark \
+    --cluster cluster-aaf3 --region us-central1 \
+    --class com.google.cloud.spark.pubsub.benchmark.PubSubToGCSBenchmark \
+    --jars gs://pakunuru-spark-pubsub-benchmark/jars/spark-pubsub-connector-latest.jar \
+    --properties "spark.driver.extraJavaOptions=$FLAGS,spark.executor.extraJavaOptions=$FLAGS,spark.driver.memory=4g,spark.jars.packages=org.apache.arrow:arrow-c-data:15.0.2,spark.pubsub.projectId=pakunuru-1119-20250930202256" \
+    -- benchmark-sub-1kb gs://pakunuru-spark-pubsub-benchmark/output/throughput_1kb
+```

@@ -1,0 +1,269 @@
+:: loading settings :: url = jar:file:/usr/lib/spark/jars/ivy-2.5.2.jar!/org/apache/ivy/core/settings/ivysettings.xml
+Ivy Default Cache set to: /root/.ivy2/cache
+The jars for the packages stored in: /root/.ivy2/jars
+org.apache.arrow#arrow-c-data added as a dependency
+:: resolving dependencies :: org.apache.spark#spark-submit-parent-3938672a-4de8-46bc-8ada-4087e16ec893;1.0
+	confs: [default]
+	found org.apache.arrow#arrow-c-data;15.0.2 in central
+	found org.apache.arrow#arrow-vector;15.0.2 in central
+	found org.apache.arrow#arrow-format;15.0.2 in central
+	found com.google.flatbuffers#flatbuffers-java;23.5.26 in central
+	found org.apache.arrow#arrow-memory-core;15.0.2 in central
+	found com.google.code.findbugs#jsr305;3.0.2 in central
+	found org.slf4j#slf4j-api;2.0.9 in central
+	found com.fasterxml.jackson.core#jackson-core;2.16.0 in central
+	found com.fasterxml.jackson.core#jackson-annotations;2.16.0 in central
+	found com.fasterxml.jackson.core#jackson-databind;2.16.0 in central
+	found com.fasterxml.jackson.datatype#jackson-datatype-jsr310;2.16.0 in central
+	found commons-codec#commons-codec;1.15 in central
+	found org.eclipse.collections#eclipse-collections;11.1.0 in central
+	found org.eclipse.collections#eclipse-collections-api;11.1.0 in central
+:: resolution report :: resolve 439ms :: artifacts dl 13ms
+	:: modules in use:
+	com.fasterxml.jackson.core#jackson-annotations;2.16.0 from central in [default]
+	com.fasterxml.jackson.core#jackson-core;2.16.0 from central in [default]
+	com.fasterxml.jackson.core#jackson-databind;2.16.0 from central in [default]
+	com.fasterxml.jackson.datatype#jackson-datatype-jsr310;2.16.0 from central in [default]
+	com.google.code.findbugs#jsr305;3.0.2 from central in [default]
+	com.google.flatbuffers#flatbuffers-java;23.5.26 from central in [default]
+	commons-codec#commons-codec;1.15 from central in [default]
+	org.apache.arrow#arrow-c-data;15.0.2 from central in [default]
+	org.apache.arrow#arrow-format;15.0.2 from central in [default]
+	org.apache.arrow#arrow-memory-core;15.0.2 from central in [default]
+	org.apache.arrow#arrow-vector;15.0.2 from central in [default]
+	org.eclipse.collections#eclipse-collections;11.1.0 from central in [default]
+	org.eclipse.collections#eclipse-collections-api;11.1.0 from central in [default]
+	org.slf4j#slf4j-api;2.0.9 from central in [default]
+	---------------------------------------------------------------------
+	|                  |            modules            ||   artifacts   |
+	|       conf       | number| search|dwnlded|evicted|| number|dwnlded|
+	---------------------------------------------------------------------
+	|      default     |   14  |   0   |   0   |   0   ||   14  |   0   |
+	---------------------------------------------------------------------
+:: retrieving :: org.apache.spark#spark-submit-parent-3938672a-4de8-46bc-8ada-4087e16ec893
+	confs: [default]
+	0 artifacts copied, 14 already retrieved (0kB/8ms)
+25/12/25 21:09:11 INFO SparkEnv: Registering MapOutputTracker
+25/12/25 21:09:12 INFO SparkEnv: Registering BlockManagerMaster
+25/12/25 21:09:12 INFO SparkEnv: Registering BlockManagerMasterHeartbeat
+25/12/25 21:09:12 INFO SparkEnv: Registering OutputCommitCoordinator
+25/12/25 21:09:12 INFO MetricsConfig: Loaded properties from hadoop-metrics2.properties
+25/12/25 21:09:12 INFO MetricsSystemImpl: Scheduled Metric snapshot period at 10 second(s).
+25/12/25 21:09:12 INFO MetricsSystemImpl: google-hadoop-file-system metrics system started
+25/12/25 21:09:12 INFO DataprocSparkPlugin: Registered 189 driver metrics
+25/12/25 21:09:13 INFO DataprocSparkPlugin: Registered 189 executor metrics
+25/12/25 21:09:13 INFO GhfsGlobalStorageStatistics: periodic connector metrics: {gcs_api_client_non_found_response_count=1, gcs_api_client_side_error_count=1, gcs_api_time=221, gcs_api_total_request_count=2, gcs_connector_time=351, gcs_list_file_request=1, gcs_list_file_request_duration=113, gcs_list_file_request_max=113, gcs_list_file_request_mean=113, gcs_list_file_request_min=113, gcs_metadata_request=1, gcs_metadata_request_duration=108, gcs_metadata_request_max=108, gcs_metadata_request_mean=108, gcs_metadata_request_min=108, gs_filesystem_create=3, gs_filesystem_initialize=2, op_get_file_status=1, op_get_file_status_duration=351, op_get_file_status_max=351, op_get_file_status_mean=351, op_get_file_status_min=351, uptimeSeconds=2} [CONTEXT ratelimit_period="5 MINUTES" ]
+25/12/25 21:09:13 INFO GoogleCloudStorageImpl: Ignoring exception of type GoogleJsonResponseException; verified object already exists with desired state.
+25/12/25 21:09:14 INFO GoogleHadoopOutputStream: hflush(): No-op due to rate limit (RateLimiter[stableRate=0.2qps]): readers will *not* yet see flushed data for gs://dataproc-temp-us-central1-52979430671-afo0flan/c87bf96e-addc-49b1-ba29-a571d19560bb/spark-job-history/local-1766696952687.inprogress [CONTEXT ratelimit_period="1 MINUTES" ]
+Starting Load Generator: Topic=benchmark-throughput-1kb, Count=1000000, Size=1024B
+25/12/25 21:09:16 INFO PubSubTableProvider: Creating PubSubTable for subscription: unknown
+25/12/25 21:09:18 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:18 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:18 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:18 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 2, taskId: 6
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 3, taskId: 7
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 1, taskId: 5
+25/12/25 21:09:18 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 0, taskId: 4
+Rust: JNI Logging initialized via GlobalRef.
+25/12/25 21:09:18 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:18 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:18 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:18 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:18 INFO NativePubSub: Rust: Loading explicit CA roots from /etc/ssl/certs/ca-certificates.crt
+Rust Raw: Connecting to gRPC endpoint: https://pubsub.googleapis.com
+Rust Raw: Connected to gRPC endpoint: https://pubsub.googleapis.com
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:18 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:18 INFO BaseAllocator: Debug mode disabled. Enable with the VM option -Darrow.memory.debug.allocator=true.
+25/12/25 21:09:18 INFO DefaultAllocationManagerOption: allocation manager type not specified, using netty as the default type
+25/12/25 21:09:18 INFO CheckAllocator: Using DefaultAllocationManager at memory-netty-14.0.2.jar!/org/apache/arrow/memory/DefaultAllocationManagerFactory.class
+25/12/25 21:09:18 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:19 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:19 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:21 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:21 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 0
+25/12/25 21:09:21 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 4, taskId: 8
+25/12/25 21:09:21 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:21 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 2
+25/12/25 21:09:21 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:21 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 5, taskId: 9
+25/12/25 21:09:21 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 1
+25/12/25 21:09:21 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:21 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:21 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 6, taskId: 10
+25/12/25 21:09:21 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:21 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 3
+25/12/25 21:09:21 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:21 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:21 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 7, taskId: 11
+25/12/25 21:09:21 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:22 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:22 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:22 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:22 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:24 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 6
+25/12/25 21:09:24 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:24 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 8, taskId: 12
+25/12/25 21:09:24 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:24 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 4
+25/12/25 21:09:24 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:24 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 9, taskId: 13
+25/12/25 21:09:24 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:24 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 7
+25/12/25 21:09:24 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 5
+25/12/25 21:09:24 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:24 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:24 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 10, taskId: 14
+25/12/25 21:09:24 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:24 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:24 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 11, taskId: 15
+25/12/25 21:09:24 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:24 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:24 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:24 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:25 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:27 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 11
+25/12/25 21:09:27 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:27 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 12, taskId: 16
+25/12/25 21:09:27 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:27 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 10
+25/12/25 21:09:27 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:27 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 13, taskId: 17
+25/12/25 21:09:27 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:27 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 8
+25/12/25 21:09:27 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:27 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 14, taskId: 18
+25/12/25 21:09:27 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:27 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:27 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+25/12/25 21:09:27 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: Acquired token (len=1031)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:27 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 9
+25/12/25 21:09:27 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:27 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:27 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 15, taskId: 19
+25/12/25 21:09:27 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:28 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:29 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 12
+25/12/25 21:09:29 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:29 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 16, taskId: 20
+25/12/25 21:09:29 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:29 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 14
+25/12/25 21:09:29 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:29 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 17, taskId: 21
+25/12/25 21:09:29 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+25/12/25 21:09:29 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 13
+25/12/25 21:09:29 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:29 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:29 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 18, taskId: 22
+25/12/25 21:09:29 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:29 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:29 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:30 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:30 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:30 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 15
+25/12/25 21:09:30 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:30 WARN PubSubDataWriter: Configured batchSize 2000 exceeds Pub/Sub limit of 1000. Capping at 1000.
+25/12/25 21:09:30 INFO PubSubDataWriter: PubSubDataWriter initialized for pakunuru-1119-20250930202256/benchmark-throughput-1kb with batchSize: 1000, lingerMs: 100
+25/12/25 21:09:30 INFO PubSubDataWriter: PubSubDataWriter created for pakunuru-1119-20250930202256/benchmark-throughput-1kb, partitionId: 19, taskId: 23
+25/12/25 21:09:30 INFO NativePubSub: Rust: NativeWriter.init called for project: pakunuru-1119-20250930202256
+Rust Raw: Acquired token (len=1031)
+25/12/25 21:09:30 INFO NativePubSub: Rust Auth: Acquired token (length: 1031, prefix: Bearer ya2)
+Rust Raw: create_channel_and_header success
+25/12/25 21:09:32 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 18
+25/12/25 21:09:32 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:32 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:32 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:32 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 16
+25/12/25 21:09:32 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:32 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:32 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 17
+25/12/25 21:09:32 INFO NativePubSub: Rust: Publisher background task ended
+25/12/25 21:09:33 INFO PubSubDataWriter: PubSubDataWriter closed for partitionId: 19
+25/12/25 21:09:33 INFO NativePubSub: Rust: Flush completed.
+25/12/25 21:09:33 INFO NativePubSub: Rust: Publisher background task ended
+Load Generation Complete.
+25/12/25 21:09:33 INFO DataprocSparkPlugin: Shutting down executor plugin. metrics=[action_http_patch_request=0, files_created=1, gcs_api_server_timeout_count=0, op_get_list_status_result_size=0, op_open=0, action_http_delete_request=0, gcs_api_time=575, gcs_backoff_count=0, gcs_api_client_unauthorized_response_count=0, stream_read_close_operations=0, stream_read_bytes_backwards_on_seek=0, gs_filesystem_create=3, exception_count=0, gcs_exception_count=0, gcs_api_total_request_count=17, op_create=1, stream_read_vectored_operations=0, gcs_metadata_request=10, gcs_api_client_bad_request_count=0, action_http_put_request=1, op_create_non_recursive=0, gcs_api_client_gone_response_count=0, gs_filesystem_initialize=2, stream_read_vectored_incoming_ranges=0, stream_write_operations=0, gcs_list_dir_request=0, stream_read_operations=0, gcs_api_client_request_timeout_count=0, op_rename=0, op_get_file_status=1, op_glob_status=0, op_exists=0, stream_write_bytes=340579, op_xattr_list=0, op_get_delegation_token=0, gcs_api_server_unavailable_count=0, directories_created=1, files_delete_rejected=0, stream_read_vectored_combined_ranges=0, op_xattr_get_named=0, gcs_list_file_request=2, op_hsync=0, action_http_get_request=0, stream_read_operations_incomplete=0, op_delete=0, stream_read_bytes=0, gcs_api_client_non_found_response_count=9, op_list_located_status=0, gcs_api_client_requested_range_not_statisfiable_count=0, op_hflush=15, op_list_status=0, stream_read_vectored_read_bytes_discarded=0, op_xattr_get_named_map=0, gcs_api_client_side_error_count=10, op_get_file_checksum=0, gcs_api_server_internal_error_count=0, stream_read_seek_bytes_skipped=0, stream_write_close_operations=0, gcs_get_media_request=0, gcs_connector_time=664, files_deleted=0, action_http_post_request=3, op_mkdirs=1, gcs_api_client_rate_limit_error_count=0, op_copy_from_local_file=0, gcs_api_server_bad_gateway_count=0, stream_readVectored_range_duration=0, stream_read_seek_backward_operations=0, gcs_api_server_side_error_count=0, write_checksum_failure_count=0, stream_read_seek_operations=0, gcs_get_other_request=0, stream_read_seek_forward_operations=0, gcs_api_client_precondition_failed_response_count=1, op_xattr_get_map=0, delegation_tokens_issued=0, gcs_backoff_time=0, gcs_list_dir_request_min=0, gcs_metadata_request_min=15, op_delete_min=0, op_glob_status_min=0, op_create_non_recursive_min=0, op_hsync_min=0, op_xattr_get_named_min=0, op_xattr_get_named_map_min=0, op_hflush_min=0, op_xattr_list_min=0, action_http_put_request_min=65, op_open_min=0, gcs_list_file_request_min=21, stream_write_close_operations_min=0, op_create_min=72, action_http_delete_request_min=0, op_mkdirs_min=119, op_list_status_min=0, gcs_get_media_request_min=0, stream_readVectored_range_duration_min=0, stream_read_vectored_operations_min=0, stream_read_close_operations_min=0, stream_read_operations_min=0, stream_read_seek_operations_min=0, op_xattr_get_map_min=0, stream_write_operations_min=0, action_http_patch_request_min=0, op_get_file_status_min=351, op_rename_min=0, delegation_tokens_issued_min=0, action_http_post_request_min=35, stream_read_close_operations_max=0, stream_read_seek_operations_max=0, op_hflush_max=115, op_xattr_list_max=0, op_xattr_get_map_max=0, action_http_put_request_max=65, action_http_patch_request_max=0, action_http_post_request_max=43, stream_write_close_operations_max=0, action_http_delete_request_max=0, op_mkdirs_max=119, gcs_get_media_request_max=0, op_rename_max=0, stream_read_vectored_operations_max=0, stream_readVectored_range_duration_max=0, op_xattr_get_named_map_max=0, stream_write_operations_max=0, stream_read_operations_max=0, op_xattr_get_named_max=0, op_glob_status_max=0, op_create_non_recursive_max=0, op_get_file_status_max=351, op_open_max=0, delegation_tokens_issued_max=0, gcs_list_file_request_max=113, gcs_metadata_request_max=108, op_create_max=72, op_delete_max=0, op_list_status_max=0, op_hsync_max=0, gcs_list_dir_request_max=0, op_open_mean=0, op_xattr_list_mean=0, op_rename_mean=0, op_xattr_get_map_mean=0, gcs_list_dir_request_mean=0, op_glob_status_mean=0, stream_read_seek_operations_mean=0, gcs_list_file_request_mean=67, stream_write_operations_mean=0, op_hflush_mean=8, gcs_metadata_request_mean=26, op_list_status_mean=0, stream_read_close_operations_mean=0, op_xattr_get_named_map_mean=0, stream_read_vectored_operations_mean=0, op_mkdirs_mean=119, action_http_post_request_mean=38, stream_write_close_operations_mean=0, action_http_put_request_mean=65, action_http_patch_request_mean=0, op_hsync_mean=0, delegation_tokens_issued_mean=0, action_http_delete_request_mean=0, stream_read_operations_mean=0, op_create_mean=72, op_delete_mean=0, op_create_non_recursive_mean=0, stream_readVectored_range_duration_mean=0, op_xattr_get_named_mean=0, gcs_get_media_request_mean=0, op_get_file_status_mean=351, op_delete_duration=0, op_get_file_status_duration=351, action_http_put_request_duration=65, stream_write_operations_duration=0, op_hsync_duration=0, gcs_metadata_request_duration=262, gcs_get_media_request_duration=0, gcs_list_file_request_duration=134, op_list_status_duration=0, op_mkdirs_duration=119, op_open_duration=0, op_create_duration=72, op_hflush_duration=122, gcs_list_dir_request_duration=0, op_glob_status_duration=0, stream_read_operations_duration=0, action_http_delete_request_duration=0, action_http_post_request_duration=114, op_rename_duration=0]
+25/12/25 21:09:33 INFO DataprocSparkPlugin: Shutting down driver plugin. metrics=[action_http_patch_request=0, files_created=1, gcs_api_server_timeout_count=0, op_get_list_status_result_size=0, op_open=0, action_http_delete_request=1, gcs_api_time=921, gcs_backoff_count=0, gcs_api_client_unauthorized_response_count=0, stream_read_close_operations=0, stream_read_bytes_backwards_on_seek=0, gs_filesystem_create=3, exception_count=0, gcs_exception_count=0, gcs_api_total_request_count=25, op_create=1, stream_read_vectored_operations=0, gcs_metadata_request=14, gcs_api_client_bad_request_count=0, action_http_put_request=2, op_create_non_recursive=0, gcs_api_client_gone_response_count=0, gs_filesystem_initialize=2, stream_read_vectored_incoming_ranges=0, stream_write_operations=0, gcs_list_dir_request=0, stream_read_operations=0, gcs_api_client_request_timeout_count=0, op_rename=0, op_get_file_status=1, op_glob_status=0, op_exists=0, stream_write_bytes=341001, op_xattr_list=0, op_get_delegation_token=0, gcs_api_server_unavailable_count=0, directories_created=1, files_delete_rejected=0, stream_read_vectored_combined_ranges=0, op_xattr_get_named=0, gcs_list_file_request=2, op_hsync=0, action_http_get_request=0, stream_read_operations_incomplete=0, op_delete=0, stream_read_bytes=0, gcs_api_client_non_found_response_count=12, op_list_located_status=0, gcs_api_client_requested_range_not_statisfiable_count=0, op_hflush=19, op_list_status=0, stream_read_vectored_read_bytes_discarded=0, op_xattr_get_named_map=0, gcs_api_client_side_error_count=13, op_get_file_checksum=0, gcs_api_server_internal_error_count=0, stream_read_seek_bytes_skipped=0, stream_write_close_operations=0, gcs_get_media_request=0, gcs_connector_time=921, files_deleted=0, action_http_post_request=5, op_mkdirs=1, gcs_api_client_rate_limit_error_count=0, op_copy_from_local_file=0, gcs_api_server_bad_gateway_count=0, stream_readVectored_range_duration=0, stream_read_seek_backward_operations=0, gcs_api_server_side_error_count=0, write_checksum_failure_count=0, stream_read_seek_operations=0, gcs_get_other_request=1, stream_read_seek_forward_operations=0, gcs_api_client_precondition_failed_response_count=1, op_xattr_get_map=0, delegation_tokens_issued=0, gcs_backoff_time=0, gcs_list_dir_request_min=0, gcs_metadata_request_min=15, op_delete_min=0, op_glob_status_min=0, op_create_non_recursive_min=0, op_hsync_min=0, op_xattr_get_named_min=0, op_xattr_get_named_map_min=0, op_hflush_min=0, op_xattr_list_min=0, action_http_put_request_min=65, op_open_min=0, gcs_list_file_request_min=21, stream_write_close_operations_min=0, op_create_min=72, action_http_delete_request_min=31, op_mkdirs_min=119, op_list_status_min=0, gcs_get_media_request_min=0, stream_readVectored_range_duration_min=0, stream_read_vectored_operations_min=0, stream_read_close_operations_min=0, stream_read_operations_min=0, stream_read_seek_operations_min=0, op_xattr_get_map_min=0, stream_write_operations_min=0, action_http_patch_request_min=0, op_get_file_status_min=351, op_rename_min=0, delegation_tokens_issued_min=0, action_http_post_request_min=32, stream_read_close_operations_max=0, stream_read_seek_operations_max=0, op_hflush_max=257, op_xattr_list_max=0, op_xattr_get_map_max=0, action_http_put_request_max=101, action_http_patch_request_max=0, action_http_post_request_max=84, stream_write_close_operations_max=0, action_http_delete_request_max=31, op_mkdirs_max=119, gcs_get_media_request_max=0, op_rename_max=0, stream_read_vectored_operations_max=0, stream_readVectored_range_duration_max=0, op_xattr_get_named_map_max=0, stream_write_operations_max=0, stream_read_operations_max=0, op_xattr_get_named_max=0, op_glob_status_max=0, op_create_non_recursive_max=0, op_get_file_status_max=351, op_open_max=0, delegation_tokens_issued_max=0, gcs_list_file_request_max=113, gcs_metadata_request_max=108, op_create_max=72, op_delete_max=0, op_list_status_max=0, op_hsync_max=0, gcs_list_dir_request_max=0, op_open_mean=0, op_xattr_list_mean=0, op_rename_mean=0, op_xattr_get_map_mean=0, gcs_list_dir_request_mean=0, op_glob_status_mean=0, stream_read_seek_operations_mean=0, gcs_list_file_request_mean=67, stream_write_operations_mean=0, op_hflush_mean=19, gcs_metadata_request_mean=23, op_list_status_mean=0, stream_read_close_operations_mean=0, op_xattr_get_named_map_mean=0, stream_read_vectored_operations_mean=0, op_mkdirs_mean=119, action_http_post_request_mean=46, stream_write_close_operations_mean=0, action_http_put_request_mean=83, action_http_patch_request_mean=0, op_hsync_mean=0, delegation_tokens_issued_mean=0, action_http_delete_request_mean=31, stream_read_operations_mean=0, op_create_mean=72, op_delete_mean=0, op_create_non_recursive_mean=0, stream_readVectored_range_duration_mean=0, op_xattr_get_named_mean=0, gcs_get_media_request_mean=0, op_get_file_status_mean=351, op_delete_duration=0, op_get_file_status_duration=351, action_http_put_request_duration=166, stream_write_operations_duration=0, op_hsync_duration=0, gcs_metadata_request_duration=335, gcs_get_media_request_duration=0, gcs_list_file_request_duration=134, op_list_status_duration=0, op_mkdirs_duration=119, op_open_duration=0, op_create_duration=72, op_hflush_duration=379, gcs_list_dir_request_duration=0, op_glob_status_duration=0, stream_read_operations_duration=0, action_http_delete_request_duration=31, action_http_post_request_duration=230, op_rename_duration=0]

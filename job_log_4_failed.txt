@@ -1,0 +1,355 @@
+:: loading settings :: url = jar:file:/usr/lib/spark/jars/ivy-2.5.2.jar!/org/apache/ivy/core/settings/ivysettings.xml
+Ivy Default Cache set to: /root/.ivy2/cache
+The jars for the packages stored in: /root/.ivy2/jars
+org.apache.arrow#arrow-c-data added as a dependency
+:: resolving dependencies :: org.apache.spark#spark-submit-parent-bfbcc45d-78d1-4c89-9e10-446460658d2b;1.0
+	confs: [default]
+	found org.apache.arrow#arrow-c-data;15.0.2 in central
+	found org.apache.arrow#arrow-vector;15.0.2 in central
+	found org.apache.arrow#arrow-format;15.0.2 in central
+	found com.google.flatbuffers#flatbuffers-java;23.5.26 in central
+	found org.apache.arrow#arrow-memory-core;15.0.2 in central
+	found com.google.code.findbugs#jsr305;3.0.2 in central
+	found org.slf4j#slf4j-api;2.0.9 in central
+	found com.fasterxml.jackson.core#jackson-core;2.16.0 in central
+	found com.fasterxml.jackson.core#jackson-annotations;2.16.0 in central
+	found com.fasterxml.jackson.core#jackson-databind;2.16.0 in central
+	found com.fasterxml.jackson.datatype#jackson-datatype-jsr310;2.16.0 in central
+	found commons-codec#commons-codec;1.15 in central
+	found org.eclipse.collections#eclipse-collections;11.1.0 in central
+	found org.eclipse.collections#eclipse-collections-api;11.1.0 in central
+:: resolution report :: resolve 444ms :: artifacts dl 16ms
+	:: modules in use:
+	com.fasterxml.jackson.core#jackson-annotations;2.16.0 from central in [default]
+	com.fasterxml.jackson.core#jackson-core;2.16.0 from central in [default]
+	com.fasterxml.jackson.core#jackson-databind;2.16.0 from central in [default]
+	com.fasterxml.jackson.datatype#jackson-datatype-jsr310;2.16.0 from central in [default]
+	com.google.code.findbugs#jsr305;3.0.2 from central in [default]
+	com.google.flatbuffers#flatbuffers-java;23.5.26 from central in [default]
+	commons-codec#commons-codec;1.15 from central in [default]
+	org.apache.arrow#arrow-c-data;15.0.2 from central in [default]
+	org.apache.arrow#arrow-format;15.0.2 from central in [default]
+	org.apache.arrow#arrow-memory-core;15.0.2 from central in [default]
+	org.apache.arrow#arrow-vector;15.0.2 from central in [default]
+	org.eclipse.collections#eclipse-collections;11.1.0 from central in [default]
+	org.eclipse.collections#eclipse-collections-api;11.1.0 from central in [default]
+	org.slf4j#slf4j-api;2.0.9 from central in [default]
+	---------------------------------------------------------------------
+	|                  |            modules            ||   artifacts   |
+	|       conf       | number| search|dwnlded|evicted|| number|dwnlded|
+	---------------------------------------------------------------------
+	|      default     |   14  |   0   |   0   |   0   ||   14  |   0   |
+	---------------------------------------------------------------------
+:: retrieving :: org.apache.spark#spark-submit-parent-bfbcc45d-78d1-4c89-9e10-446460658d2b
+	confs: [default]
+	0 artifacts copied, 14 already retrieved (0kB/8ms)
+25/12/25 20:30:58 INFO SparkEnv: Registering MapOutputTracker
+25/12/25 20:30:58 INFO SparkEnv: Registering BlockManagerMaster
+25/12/25 20:30:58 INFO SparkEnv: Registering BlockManagerMasterHeartbeat
+25/12/25 20:30:58 INFO SparkEnv: Registering OutputCommitCoordinator
+25/12/25 20:30:58 INFO MetricsConfig: Loaded properties from hadoop-metrics2.properties
+25/12/25 20:30:58 INFO MetricsSystemImpl: Scheduled Metric snapshot period at 10 second(s).
+25/12/25 20:30:58 INFO MetricsSystemImpl: google-hadoop-file-system metrics system started
+25/12/25 20:30:58 INFO DataprocSparkPlugin: Registered 189 driver metrics
+25/12/25 20:30:59 INFO DefaultNoHARMFailoverProxyProvider: Connecting to ResourceManager at cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal./10.1.0.5:8032
+25/12/25 20:30:59 INFO AHSProxy: Connecting to Application History server at cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal./10.1.0.5:10200
+25/12/25 20:30:59 INFO Configuration: resource-types.xml not found
+25/12/25 20:30:59 INFO ResourceUtils: Unable to find 'resource-types.xml'.
+25/12/25 20:31:00 INFO YarnClientImpl: Submitted application application_1766679653776_0034
+25/12/25 20:31:01 INFO DefaultNoHARMFailoverProxyProvider: Connecting to ResourceManager at cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal./10.1.0.5:8030
+25/12/25 20:31:03 INFO GhfsGlobalStorageStatistics: periodic connector metrics: {gcs_api_client_non_found_response_count=1, gcs_api_client_side_error_count=1, gcs_api_time=274, gcs_api_total_request_count=2, gcs_connector_time=351, gcs_list_file_request=1, gcs_list_file_request_duration=137, gcs_list_file_request_max=137, gcs_list_file_request_mean=137, gcs_list_file_request_min=137, gcs_metadata_request=1, gcs_metadata_request_duration=137, gcs_metadata_request_max=137, gcs_metadata_request_mean=137, gcs_metadata_request_min=137, gs_filesystem_create=3, gs_filesystem_initialize=2, op_get_file_status=1, op_get_file_status_duration=351, op_get_file_status_max=351, op_get_file_status_mean=351, op_get_file_status_min=351, uptimeSeconds=6} [CONTEXT ratelimit_period="5 MINUTES" ]
+25/12/25 20:31:03 INFO GoogleCloudStorageImpl: Ignoring exception of type GoogleJsonResponseException; verified object already exists with desired state.
+25/12/25 20:31:03 INFO GoogleHadoopOutputStream: hflush(): No-op due to rate limit (RateLimiter[stableRate=0.2qps]): readers will *not* yet see flushed data for gs://dataproc-temp-us-central1-52979430671-afo0flan/c87bf96e-addc-49b1-ba29-a571d19560bb/spark-job-history/application_1766679653776_0034.inprogress [CONTEXT ratelimit_period="1 MINUTES" ]
+Starting Load Generator: Topic=benchmark-throughput-1kb, Count=1000000, Size=1024B
+25/12/25 20:31:08 INFO PubSubTableProvider: Creating PubSubTable for subscription: unknown
+25/12/25 20:31:15 WARN TaskSetManager: Lost task 2.0 in stage 2.0 (TID 4) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 1): java.lang.RuntimeException: Native writeBatch failed with code -4
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.flush(PubSubWrite.scala:146)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:113)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:71)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.write(WriteToDataSourceV2Exec.scala:530)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$5(WriteToDataSourceV2Exec.scala:482)
+	at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1399)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run(WriteToDataSourceV2Exec.scala:523)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run$(WriteToDataSourceV2Exec.scala:459)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.run(WriteToDataSourceV2Exec.scala:528)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.$anonfun$writeWithV2$2(WriteToDataSourceV2Exec.scala:408)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)
+	at org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:166)
+	at org.apache.spark.scheduler.Task.run(Task.scala:141)
+	at org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)
+	at org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:96)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+	Suppressed: java.lang.RuntimeException: NativeWriter.close failed with code -1
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.close(PubSubWrite.scala:189)
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.abort(PubSubWrite.scala:171)
+		at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$10(WriteToDataSourceV2Exec.scala:519)
+		at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1410)
+		... 15 more
+
+25/12/25 20:31:16 ERROR TaskSetManager: Task 5 in stage 2.0 failed 4 times; aborting job
+25/12/25 20:31:16 ERROR AppendDataExec: Data source write support com.google.cloud.spark.pubsub.PubSubBatchWrite@67d361fa is aborting.
+25/12/25 20:31:16 ERROR AppendDataExec: Data source write support com.google.cloud.spark.pubsub.PubSubBatchWrite@67d361fa aborted.
+Exception in thread "main" org.apache.spark.SparkException: Job aborted due to stage failure: Task 5 in stage 2.0 failed 4 times, most recent failure: Lost task 5.3 in stage 2.0 (TID 14) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 2): java.lang.RuntimeException: Native writeBatch failed with code -4
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.flush(PubSubWrite.scala:146)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:113)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:71)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.write(WriteToDataSourceV2Exec.scala:530)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$5(WriteToDataSourceV2Exec.scala:482)
+	at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1399)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run(WriteToDataSourceV2Exec.scala:523)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run$(WriteToDataSourceV2Exec.scala:459)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.run(WriteToDataSourceV2Exec.scala:528)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.$anonfun$writeWithV2$2(WriteToDataSourceV2Exec.scala:408)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)
+	at org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:166)
+	at org.apache.spark.scheduler.Task.run(Task.scala:141)
+	at org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)
+	at org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:96)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+	Suppressed: java.lang.RuntimeException: NativeWriter.close failed with code -1
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.close(PubSubWrite.scala:189)
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.abort(PubSubWrite.scala:171)
+		at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$10(WriteToDataSourceV2Exec.scala:519)
+		at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1410)
+		... 15 more
+
+Driver stacktrace:
+	at org.apache.spark.scheduler.DAGScheduler.failJobAndIndependentStages(DAGScheduler.scala:2856)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$abortStage$2(DAGScheduler.scala:2792)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$abortStage$2$adapted(DAGScheduler.scala:2791)
+	at scala.collection.mutable.ResizableArray.foreach(ResizableArray.scala:62)
+	at scala.collection.mutable.ResizableArray.foreach$(ResizableArray.scala:55)
+	at scala.collection.mutable.ArrayBuffer.foreach(ArrayBuffer.scala:49)
+	at org.apache.spark.scheduler.DAGScheduler.abortStage(DAGScheduler.scala:2791)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$handleTaskSetFailed$1(DAGScheduler.scala:1247)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$handleTaskSetFailed$1$adapted(DAGScheduler.scala:1247)
+	at scala.Option.foreach(Option.scala:407)
+	at org.apache.spark.scheduler.DAGScheduler.handleTaskSetFailed(DAGScheduler.scala:1247)
+	at org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.doOnReceive(DAGScheduler.scala:3061)
+	at org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.onReceive(DAGScheduler.scala:2994)
+	at org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.onReceive(DAGScheduler.scala:2983)
+	at org.apache.spark.util.EventLoop$$anon$1.run(EventLoop.scala:49)
+	at org.apache.spark.scheduler.DAGScheduler.runJob(DAGScheduler.scala:989)
+	at org.apache.spark.SparkContext.runJob(SparkContext.scala:2456)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.writeWithV2(WriteToDataSourceV2Exec.scala:405)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.writeWithV2$(WriteToDataSourceV2Exec.scala:379)
+	at org.apache.spark.sql.execution.datasources.v2.AppendDataExec.writeWithV2(WriteToDataSourceV2Exec.scala:232)
+	at org.apache.spark.sql.execution.datasources.v2.V2ExistingTableWriteExec.run(WriteToDataSourceV2Exec.scala:344)
+	at org.apache.spark.sql.execution.datasources.v2.V2ExistingTableWriteExec.run$(WriteToDataSourceV2Exec.scala:343)
+	at org.apache.spark.sql.execution.datasources.v2.AppendDataExec.run(WriteToDataSourceV2Exec.scala:232)
+	at org.apache.spark.sql.execution.datasources.v2.V2CommandExec.result$lzycompute(V2CommandExec.scala:43)
+	at org.apache.spark.sql.execution.datasources.v2.V2CommandExec.result(V2CommandExec.scala:43)
+	at org.apache.spark.sql.execution.datasources.v2.V2CommandExec.executeCollect(V2CommandExec.scala:49)
+	at org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.$anonfun$applyOrElse$1(QueryExecution.scala:108)
+	at org.apache.spark.sql.execution.SQLExecution$.$anonfun$withNewExecutionId$6(SQLExecution.scala:125)
+	at org.apache.spark.sql.execution.SQLExecution$.withSQLConfPropagated(SQLExecution.scala:201)
+	at org.apache.spark.sql.execution.SQLExecution$.$anonfun$withNewExecutionId$1(SQLExecution.scala:108)
+	at org.apache.spark.sql.SparkSession.withActive(SparkSession.scala:900)
+	at org.apache.spark.sql.execution.SQLExecution$.withNewExecutionId(SQLExecution.scala:66)
+	at org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.applyOrElse(QueryExecution.scala:108)
+	at org.apache.spark.sql.execution.QueryExecution$$anonfun$eagerlyExecuteCommands$1.applyOrElse(QueryExecution.scala:99)
+	at org.apache.spark.sql.catalyst.trees.TreeNode.$anonfun$transformDownWithPruning$1(TreeNode.scala:473)
+	at org.apache.spark.sql.catalyst.trees.CurrentOrigin$.withOrigin(origin.scala:76)
+	at org.apache.spark.sql.catalyst.trees.TreeNode.transformDownWithPruning(TreeNode.scala:473)
+	at org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.org$apache$spark$sql$catalyst$plans$logical$AnalysisHelper$$super$transformDownWithPruning(LogicalPlan.scala:32)
+	at org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper.transformDownWithPruning(AnalysisHelper.scala:267)
+	at org.apache.spark.sql.catalyst.plans.logical.AnalysisHelper.transformDownWithPruning$(AnalysisHelper.scala:263)
+	at org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.transformDownWithPruning(LogicalPlan.scala:32)
+	at org.apache.spark.sql.catalyst.plans.logical.LogicalPlan.transformDownWithPruning(LogicalPlan.scala:32)
+	at org.apache.spark.sql.catalyst.trees.TreeNode.transformDown(TreeNode.scala:449)
+	at org.apache.spark.sql.execution.QueryExecution.eagerlyExecuteCommands(QueryExecution.scala:99)
+	at org.apache.spark.sql.execution.QueryExecution.commandExecuted$lzycompute(QueryExecution.scala:86)
+	at org.apache.spark.sql.execution.QueryExecution.commandExecuted(QueryExecution.scala:84)
+	at org.apache.spark.sql.execution.QueryExecution.assertCommandExecuted(QueryExecution.scala:143)
+	at org.apache.spark.sql.DataFrameWriter.runCommand(DataFrameWriter.scala:869)
+	at org.apache.spark.sql.DataFrameWriter.saveInternal(DataFrameWriter.scala:315)
+	at org.apache.spark.sql.DataFrameWriter.save(DataFrameWriter.scala:251)
+	at com.google.cloud.spark.pubsub.benchmark.PubSubLoadGenerator$.main(PubSubLoadGenerator.scala:47)
+	at com.google.cloud.spark.pubsub.benchmark.PubSubLoadGenerator.main(PubSubLoadGenerator.scala)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:566)
+	at org.apache.spark.deploy.JavaMainApplication.start(SparkApplication.scala:52)
+	at org.apache.spark.deploy.SparkSubmit.org$apache$spark$deploy$SparkSubmit$$runMain(SparkSubmit.scala:1216)
+	at org.apache.spark.deploy.SparkSubmit.doRunMain$1(SparkSubmit.scala:195)
+	at org.apache.spark.deploy.SparkSubmit.submit(SparkSubmit.scala:218)
+	at org.apache.spark.deploy.SparkSubmit.doSubmit(SparkSubmit.scala:92)
+	at org.apache.spark.deploy.SparkSubmit$$anon$2.doSubmit(SparkSubmit.scala:1314)
+	at org.apache.spark.deploy.SparkSubmit$.main(SparkSubmit.scala:1323)
+	at org.apache.spark.deploy.SparkSubmit.main(SparkSubmit.scala)
+Caused by: java.lang.RuntimeException: Native writeBatch failed with code -4
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.flush(PubSubWrite.scala:146)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:113)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:71)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.write(WriteToDataSourceV2Exec.scala:530)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$5(WriteToDataSourceV2Exec.scala:482)
+	at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1399)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run(WriteToDataSourceV2Exec.scala:523)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run$(WriteToDataSourceV2Exec.scala:459)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.run(WriteToDataSourceV2Exec.scala:528)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.$anonfun$writeWithV2$2(WriteToDataSourceV2Exec.scala:408)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)
+	at org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:166)
+	at org.apache.spark.scheduler.Task.run(Task.scala:141)
+	at org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)
+	at org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:96)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+	Suppressed: java.lang.RuntimeException: NativeWriter.close failed with code -1
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.close(PubSubWrite.scala:189)
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.abort(PubSubWrite.scala:171)
+		at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$10(WriteToDataSourceV2Exec.scala:519)
+		at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1410)
+		... 15 more
+25/12/25 20:31:16 WARN TaskSetManager: Lost task 0.3 in stage 2.0 (TID 17) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 1): TaskKilled (Stage cancelled: Job aborted due to stage failure: Task 5 in stage 2.0 failed 4 times, most recent failure: Lost task 5.3 in stage 2.0 (TID 14) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 2): java.lang.RuntimeException: Native writeBatch failed with code -4
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.flush(PubSubWrite.scala:146)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:113)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:71)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.write(WriteToDataSourceV2Exec.scala:530)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$5(WriteToDataSourceV2Exec.scala:482)
+	at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1399)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run(WriteToDataSourceV2Exec.scala:523)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run$(WriteToDataSourceV2Exec.scala:459)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.run(WriteToDataSourceV2Exec.scala:528)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.$anonfun$writeWithV2$2(WriteToDataSourceV2Exec.scala:408)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)
+	at org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:166)
+	at org.apache.spark.scheduler.Task.run(Task.scala:141)
+	at org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)
+	at org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:96)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+	Suppressed: java.lang.RuntimeException: NativeWriter.close failed with code -1
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.close(PubSubWrite.scala:189)
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.abort(PubSubWrite.scala:171)
+		at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$10(WriteToDataSourceV2Exec.scala:519)
+		at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1410)
+		... 15 more
+
+Driver stacktrace:)
+25/12/25 20:31:16 WARN TaskSetManager: Lost task 4.2 in stage 2.0 (TID 13) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 1): TaskKilled (Stage cancelled: Job aborted due to stage failure: Task 5 in stage 2.0 failed 4 times, most recent failure: Lost task 5.3 in stage 2.0 (TID 14) (cluster-aaf3-m.us-central1-c.c.pakunuru-1119-20250930202256.internal executor 2): java.lang.RuntimeException: Native writeBatch failed with code -4
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.flush(PubSubWrite.scala:146)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:113)
+	at com.google.cloud.spark.pubsub.PubSubDataWriter.write(PubSubWrite.scala:71)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.write(WriteToDataSourceV2Exec.scala:530)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$5(WriteToDataSourceV2Exec.scala:482)
+	at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1399)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run(WriteToDataSourceV2Exec.scala:523)
+	at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.run$(WriteToDataSourceV2Exec.scala:459)
+	at org.apache.spark.sql.execution.datasources.v2.DataWritingSparkTask$.run(WriteToDataSourceV2Exec.scala:528)
+	at org.apache.spark.sql.execution.datasources.v2.V2TableWriteExec.$anonfun$writeWithV2$2(WriteToDataSourceV2Exec.scala:408)
+	at org.apache.spark.scheduler.ResultTask.runTask(ResultTask.scala:93)
+	at org.apache.spark.TaskContext.runTaskWithListeners(TaskContext.scala:166)
+	at org.apache.spark.scheduler.Task.run(Task.scala:141)
+	at org.apache.spark.executor.Executor$TaskRunner.$anonfun$run$4(Executor.scala:620)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally(SparkErrorUtils.scala:64)
+	at org.apache.spark.util.SparkErrorUtils.tryWithSafeFinally$(SparkErrorUtils.scala:61)
+	at org.apache.spark.util.Utils$.tryWithSafeFinally(Utils.scala:96)
+	at org.apache.spark.executor.Executor$TaskRunner.run(Executor.scala:623)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1128)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:628)
+	at java.base/java.lang.Thread.run(Thread.java:829)
+	Suppressed: java.lang.RuntimeException: NativeWriter.close failed with code -1
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.close(PubSubWrite.scala:189)
+		at com.google.cloud.spark.pubsub.PubSubDataWriter.abort(PubSubWrite.scala:171)
+		at org.apache.spark.sql.execution.datasources.v2.WritingSparkTask.$anonfun$run$10(WriteToDataSourceV2Exec.scala:519)
+		at org.apache.spark.util.Utils$.tryWithSafeFinallyAndFailureCallbacks(Utils.scala:1410)
+		... 15 more
+
+Driver stacktrace:)
+25/12/25 20:31:17 ERROR TransportRequestHandler: Error while invoking RpcHandler#receive() for one-way message.
+org.apache.spark.SparkException: Could not find CoarseGrainedScheduler.
+	at org.apache.spark.rpc.netty.Dispatcher.postMessage(Dispatcher.scala:178) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.rpc.netty.Dispatcher.postOneWayMessage(Dispatcher.scala:150) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.rpc.netty.NettyRpcHandler.receive(NettyRpcEnv.scala:690) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportRequestHandler.processOneWayMessage(TransportRequestHandler.java:274) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportRequestHandler.handle(TransportRequestHandler.java:111) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportChannelHandler.channelRead0(TransportChannelHandler.java:140) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportChannelHandler.channelRead0(TransportChannelHandler.java:53) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at io.netty.channel.SimpleChannelInboundHandler.channelRead(SimpleChannelInboundHandler.java:99) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.handler.timeout.IdleStateHandler.channelRead(IdleStateHandler.java:286) [netty-handler-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:442) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.handler.codec.MessageToMessageDecoder.channelRead(MessageToMessageDecoder.java:103) [netty-codec-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at org.apache.spark.network.util.TransportFrameDecoder.channelRead(TransportFrameDecoder.java:102) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.DefaultChannelPipeline$HeadContext.channelRead(DefaultChannelPipeline.java:1410) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:440) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.DefaultChannelPipeline.fireChannelRead(DefaultChannelPipeline.java:919) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe.read(AbstractNioByteChannel.java:166) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:788) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:724) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:650) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:562) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:997) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at java.base/java.lang.Thread.run(Thread.java:829) [?:?]
+25/12/25 20:31:17 ERROR TransportRequestHandler: Error while invoking RpcHandler#receive() for one-way message.
+org.apache.spark.SparkException: Could not find CoarseGrainedScheduler.
+	at org.apache.spark.rpc.netty.Dispatcher.postMessage(Dispatcher.scala:178) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.rpc.netty.Dispatcher.postOneWayMessage(Dispatcher.scala:150) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.rpc.netty.NettyRpcHandler.receive(NettyRpcEnv.scala:690) ~[spark-core_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportRequestHandler.processOneWayMessage(TransportRequestHandler.java:274) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportRequestHandler.handle(TransportRequestHandler.java:111) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportChannelHandler.channelRead0(TransportChannelHandler.java:140) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at org.apache.spark.network.server.TransportChannelHandler.channelRead0(TransportChannelHandler.java:53) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at io.netty.channel.SimpleChannelInboundHandler.channelRead(SimpleChannelInboundHandler.java:99) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.handler.timeout.IdleStateHandler.channelRead(IdleStateHandler.java:286) [netty-handler-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:442) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.handler.codec.MessageToMessageDecoder.channelRead(MessageToMessageDecoder.java:103) [netty-codec-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at org.apache.spark.network.util.TransportFrameDecoder.channelRead(TransportFrameDecoder.java:102) [spark-network-common_2.12-3.5.3.jar:3.5.3]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:444) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.fireChannelRead(AbstractChannelHandlerContext.java:412) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.DefaultChannelPipeline$HeadContext.channelRead(DefaultChannelPipeline.java:1410) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:440) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.AbstractChannelHandlerContext.invokeChannelRead(AbstractChannelHandlerContext.java:420) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.DefaultChannelPipeline.fireChannelRead(DefaultChannelPipeline.java:919) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe.read(AbstractNioByteChannel.java:166) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:788) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:724) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:650) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:562) [netty-transport-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:997) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30) [netty-common-4.1.100.Final.jar:4.1.100.Final]
+	at java.base/java.lang.Thread.run(Thread.java:829) [?:?]
+25/12/25 20:31:17 INFO DataprocSparkPlugin: Shutting down driver plugin. metrics=[action_http_patch_request=0, files_created=1, gcs_api_server_timeout_count=0, op_get_list_status_result_size=0, op_open=0, action_http_delete_request=2, gcs_api_time=1362, gcs_backoff_count=0, gcs_api_client_unauthorized_response_count=0, stream_read_close_operations=0, stream_read_bytes_backwards_on_seek=0, gs_filesystem_create=3, exception_count=0, gcs_exception_count=0, gcs_api_total_request_count=33, op_create=1, stream_read_vectored_operations=0, gcs_metadata_request=17, gcs_api_client_bad_request_count=0, action_http_put_request=3, op_create_non_recursive=0, gcs_api_client_gone_response_count=0, gs_filesystem_initialize=2, stream_read_vectored_incoming_ranges=0, stream_write_operations=0, gcs_list_dir_request=0, stream_read_operations=0, gcs_api_client_request_timeout_count=0, op_rename=0, op_get_file_status=1, op_glob_status=0, op_exists=0, stream_write_bytes=363899, op_xattr_list=0, op_get_delegation_token=0, gcs_api_server_unavailable_count=0, directories_created=1, files_delete_rejected=0, stream_read_vectored_combined_ranges=0, op_xattr_get_named=0, gcs_list_file_request=2, op_hsync=0, action_http_get_request=0, stream_read_operations_incomplete=0, op_delete=0, stream_read_bytes=0, gcs_api_client_non_found_response_count=15, op_list_located_status=0, gcs_api_client_requested_range_not_statisfiable_count=0, op_hflush=22, op_list_status=0, stream_read_vectored_read_bytes_discarded=0, op_xattr_get_named_map=0, gcs_api_client_side_error_count=16, op_get_file_checksum=0, gcs_api_server_internal_error_count=0, stream_read_seek_bytes_skipped=0, stream_write_close_operations=0, gcs_get_media_request=0, gcs_connector_time=1252, files_deleted=0, action_http_post_request=7, op_mkdirs=1, gcs_api_client_rate_limit_error_count=0, op_copy_from_local_file=0, gcs_api_server_bad_gateway_count=0, stream_readVectored_range_duration=0, stream_read_seek_backward_operations=0, gcs_api_server_side_error_count=0, write_checksum_failure_count=0, stream_read_seek_operations=0, gcs_get_other_request=2, stream_read_seek_forward_operations=0, gcs_api_client_precondition_failed_response_count=1, op_xattr_get_map=0, delegation_tokens_issued=0, gcs_backoff_time=0, gcs_list_dir_request_min=0, gcs_metadata_request_min=14, op_delete_min=0, op_glob_status_min=0, op_create_non_recursive_min=0, op_hsync_min=0, op_xattr_get_named_min=0, op_xattr_get_named_map_min=0, op_hflush_min=0, op_xattr_list_min=0, action_http_put_request_min=71, op_open_min=0, gcs_list_file_request_min=16, stream_write_close_operations_min=0, op_create_min=61, action_http_delete_request_min=39, op_mkdirs_min=113, op_list_status_min=0, gcs_get_media_request_min=0, stream_readVectored_range_duration_min=0, stream_read_vectored_operations_min=0, stream_read_close_operations_min=0, stream_read_operations_min=0, stream_read_seek_operations_min=0, op_xattr_get_map_min=0, stream_write_operations_min=0, action_http_patch_request_min=0, op_get_file_status_min=351, op_rename_min=0, delegation_tokens_issued_min=0, action_http_post_request_min=29, stream_read_close_operations_max=0, stream_read_seek_operations_max=0, op_hflush_max=351, op_xattr_list_max=0, op_xattr_get_map_max=0, action_http_put_request_max=105, action_http_patch_request_max=0, action_http_post_request_max=89, stream_write_close_operations_max=0, action_http_delete_request_max=42, op_mkdirs_max=113, gcs_get_media_request_max=0, op_rename_max=0, stream_read_vectored_operations_max=0, stream_readVectored_range_duration_max=0, op_xattr_get_named_map_max=0, stream_write_operations_max=0, stream_read_operations_max=0, op_xattr_get_named_max=0, op_glob_status_max=0, op_create_non_recursive_max=0, op_get_file_status_max=351, op_open_max=0, delegation_tokens_issued_max=0, gcs_list_file_request_max=137, gcs_metadata_request_max=137, op_create_max=61, op_delete_max=0, op_list_status_max=0, op_hsync_max=0, gcs_list_dir_request_max=0, op_open_mean=0, op_xattr_list_mean=0, op_rename_mean=0, op_xattr_get_map_mean=0, gcs_list_dir_request_mean=0, op_glob_status_mean=0, stream_read_seek_operations_mean=0, gcs_list_file_request_mean=76, stream_write_operations_mean=0, op_hflush_mean=33, gcs_metadata_request_mean=29, op_list_status_mean=0, stream_read_close_operations_mean=0, op_xattr_get_named_map_mean=0, stream_read_vectored_operations_mean=0, op_mkdirs_mean=113, action_http_post_request_mean=48, stream_write_close_operations_mean=0, action_http_put_request_mean=85, action_http_patch_request_mean=0, op_hsync_mean=0, delegation_tokens_issued_mean=0, action_http_delete_request_mean=40, stream_read_operations_mean=0, op_create_mean=61, op_delete_mean=0, op_create_non_recursive_mean=0, stream_readVectored_range_duration_mean=0, op_xattr_get_named_mean=0, gcs_get_media_request_mean=0, op_get_file_status_mean=351, op_delete_duration=0, op_get_file_status_duration=351, action_http_put_request_duration=255, stream_write_operations_duration=0, op_hsync_duration=0, gcs_metadata_request_duration=508, gcs_get_media_request_duration=0, gcs_list_file_request_duration=153, op_list_status_duration=0, op_mkdirs_duration=113, op_open_duration=0, op_create_duration=61, op_hflush_duration=727, gcs_list_dir_request_duration=0, op_glob_status_duration=0, stream_read_operations_duration=0, action_http_delete_request_duration=81, action_http_post_request_duration=337, op_rename_duration=0]

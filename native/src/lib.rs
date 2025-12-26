@@ -322,6 +322,12 @@ mod jni {
             })
         }
 
+        pub extern "jni" fn getNativeMemoryUsage(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(-1, || {
+                 crate::pubsub::get_buffered_bytes()
+            })
+        }
+
         /// Destroys the `RustPartitionReader` and shuts down its Tokio runtime.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {

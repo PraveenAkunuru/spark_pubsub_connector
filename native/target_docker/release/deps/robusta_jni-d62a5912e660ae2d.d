@@ -1,0 +1,11 @@
+/code/native/target_docker/release/deps/robusta_jni-d62a5912e660ae2d.d: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/field.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/safe.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/unchecked.rs
+
+/code/native/target_docker/release/deps/librobusta_jni-d62a5912e660ae2d.rlib: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/field.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/safe.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/unchecked.rs
+
+/code/native/target_docker/release/deps/librobusta_jni-d62a5912e660ae2d.rmeta: /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/lib.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/mod.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/field.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/safe.rs /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/unchecked.rs
+
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/lib.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/mod.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/field.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/safe.rs:
+/usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/robusta_jni-0.2.2/src/convert/unchecked.rs:

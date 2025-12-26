@@ -26,6 +26,10 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
   private val projectId = PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, options, spark).getOrElse("")
   private val subscriptionId = PubSubConfig.getOption(PubSubConfig.SUBSCRIPTION_ID_KEY, options, spark).getOrElse("")
 
+  if (subscriptionId.isEmpty) {
+    throw new IllegalArgumentException(s"Missing required option: '${PubSubConfig.SUBSCRIPTION_ID_KEY}'. Please provide a valid subscription ID.")
+  }
+
   
   private var currentOffset: Long = 0
   // Map of BatchID -> Remaining Cycles (TTL). 

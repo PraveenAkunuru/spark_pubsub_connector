@@ -1,0 +1,30 @@
+#!/bin/bash
+# Generates the mandatory JVM flags required for the Spark Pub/Sub Connector (Java 17+).
+# Usage:
+#   export SPARK_SUBMIT_OPTS="$(./scripts/generate_spark_flags.sh)"
+#   spark-submit ...
+#
+# Or inline:
+#   spark-submit $(./scripts/generate_spark_flags.sh) ...
+
+FLAGS=(
+  "--add-opens=java.base/java.nio=ALL-UNNAMED"
+  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+  "--add-opens=java.base/java.lang=ALL-UNNAMED"
+  "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED"
+  "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED"
+  "--add-opens=java.base/java.io=ALL-UNNAMED"
+  "--add-opens=java.base/java.net=ALL-UNNAMED"
+  "--add-opens=java.base/java.util=ALL-UNNAMED"
+  "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED"
+  "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED"
+  "--add-opens=java.base/sun.nio.cs=ALL-UNNAMED"
+  "--add-opens=java.base/sun.security.action=ALL-UNNAMED"
+  "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
+  "--add-opens=java.base/sun.util.logging=ALL-UNNAMED"
+  "--add-opens=java.base/javax.security.auth=ALL-UNNAMED"
+  "--add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED"
+)
+
+# Output as a single string
+echo "${FLAGS[@]}"

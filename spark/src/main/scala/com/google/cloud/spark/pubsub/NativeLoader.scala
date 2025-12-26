@@ -14,7 +14,7 @@ import java.nio.file.Files
  */
 object NativeLoader {
   private var loaded = false
-  private val LIB_NAME = "native_pubsub_connector"
+  private val LIB_NAME = "native_pubsub_connector_glibc_2_31"
 
   /**
    * Triggers the loading of the native library if it hasn't been loaded yet.

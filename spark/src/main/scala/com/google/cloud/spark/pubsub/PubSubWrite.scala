@@ -23,6 +23,11 @@ class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) 
       PubSubConfig.FORMAT_KEY -> PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("json"),
       PubSubConfig.AVRO_SCHEMA_KEY -> PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("")
     )
+
+    if (resolvedOptions(PubSubConfig.TOPIC_ID_KEY).isEmpty) {
+      throw new IllegalArgumentException(s"Missing required option: '${PubSubConfig.TOPIC_ID_KEY}'. Please provide a valid topic ID.")
+    }
+
     new PubSubWrite(schema, resolvedOptions)
   }
 }
@@ -68,8 +73,16 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   
   private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, "")
   private val topicId = options.getOrElse(PubSubConfig.TOPIC_ID_KEY, "")
-  private val batchSize = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
+  private val batchSizeRaw = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
+  private val batchSize = if (batchSizeRaw > 1000) {
+    logWarning(s"Configured batchSize $batchSizeRaw exceeds Pub/Sub limit of 1000. Capping at 1000.")
+    1000
+  } else {
+    batchSizeRaw
+  }
   private val lingerMs = options.getOrElse(PubSubConfig.LINGER_MS_KEY, PubSubConfig.DEFAULT_LINGER_MS.toString).toLong
+  
+  logInfo(s"PubSubDataWriter initialized for $projectId/$topicId with batchSize: $batchSize, lingerMs: $lingerMs")
   private val maxBatchBytes = options.getOrElse(PubSubConfig.MAX_BATCH_BYTES_KEY, "5242880").toLong // 5MB default
   private val flushTimeoutMs = options.getOrElse(PubSubConfig.FLUSH_TIMEOUT_MS_KEY, PubSubConfig.DEFAULT_FLUSH_TIMEOUT_MS.toString).toLong
   
