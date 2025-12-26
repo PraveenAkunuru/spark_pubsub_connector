@@ -67,7 +67,7 @@ lazy val commonSettings = Seq(
       if (!platformDir.exists()) platformDir.mkdirs()
       
       val extension = if (osName == "darwin") "dylib" else "so"
-      val libName = s"libnative_pubsub_connector_glibc_2_31.$extension"
+      val libName = s"libnative_pubsub_connector.$extension"
       val sourceFile = nativeTarget / s"libnative_pubsub_connector.$extension"
       
       if (sourceFile.exists()) {

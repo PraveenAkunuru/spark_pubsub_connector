@@ -1,7 +1,7 @@
 # Spark Pub/Sub Connector (Native Rust/Arrow)
 
 > [!NOTE]
-> **Status**: Verified on Dataproc 2.3 (Spark 3.5, Java 17). Stable for production piloting.
+> **Status**: Verified on Dataproc 2.3 (Spark 3.5, Java 11). Ready for independent review and production piloting.
 
 A high-performance, native Google Cloud Pub/Sub connector for Apache Spark (Structured Streaming), leveraging **Rust** and **Apache Arrow** for zero-copy data transfer and gRPC efficiency.
 
@@ -60,8 +60,17 @@ To run this connector, you **must** allow native memory access. See [TROUBLESHOO
 | `subscriptionId` | Pub/Sub Subscription ID (Read). | **Required** |
 | `topicId` | Pub/Sub Topic ID (Write). | **Required** |
 | `projectId` | GCP Project ID (inferred if omitted). | *Auto* |
+| `format` | Data format: `raw`, `json`, or `avro`. | `raw` |
 | `batchSize` | Messages to buffer before flush. | `1000` |
-| `numPartitions` | Number of parallel read partitions. | *Cluster Cores* |
+| `numPartitions` | Number of parallel read partitions. | *Cluster Cores * 2* |
+
+## 🔋 Resource Sizing Recommendations
+
+Based on cloud verification benchmarks (1KB messages):
+
+- **JVM Heap**: 1GB - 2GB is typically sufficient as heavy lifting is offloaded to Rust.
+- **Memory Overhead**: Minimum **512MB** recommended. If processing high-volume structured data (Avro/JSON), increase to **1GB+** to accommodate Rust's internal buffers.
+- **Cores**: The connector scales linearly with executor cores. Intelligent parallelism defaults to `2 * cores` partitions.
 
 ## 📄 License
 Licensed under **MIT-0**. See [LICENSE](LICENSE).

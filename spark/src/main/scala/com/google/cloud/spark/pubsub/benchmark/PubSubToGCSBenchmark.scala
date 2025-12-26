@@ -100,10 +100,10 @@ class BenchmarkListener(reportIntervalMin: Int) extends StreamingQueryListener {
       
       println(s"--- Benchmark Status Update ---")
       println(s"Time: ${new java.util.Date(now)}")
-      println(s"Elapsed: ${elapsedTotalSec.formatted("%.2f")}s")
+      println(f"Elapsed: $elapsedTotalSec%.2fs")
       println(s"Total Rows: $currentTotalRows")
-      println(s"Avg Throughput: ${avgThroughput.formatted("%.2f")} rows/sec")
-      println(s"Current Batch Throughput: ${progress.processedRowsPerSecond.formatted("%.2f")} rows/sec")
+      println(f"Avg Throughput: $avgThroughput%.2f rows/sec")
+      println(f"Current Batch Throughput: ${progress.processedRowsPerSecond}%.2f rows/sec")
       println("-------------------------------")
       
       lastReportTime = now

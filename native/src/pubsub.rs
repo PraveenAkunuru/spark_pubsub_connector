@@ -49,28 +49,6 @@ pub fn ack_reservoir_instant_now() -> Instant {
     Instant::now()
 }
 
-// Helper to access pool safely
-// fn get_connection_pool() -> &'static std::sync::Mutex<std::collections::HashMap<String, Channel>> {
-//     &CONNECTION_POOL
-// }
-
-// Helper to access reservoir safely (though we use public static usually, keeping this for consistency if needed)
-// Actually, code uses ACK_RESERVOIR directly. I should make sure it initializes it or lazy initializes.
-// The code uses `ACK_RESERVOIR.lock()` which implies it's a Mutex, NOT a OnceLock<Mutex>.
-// Wait, typically Mutex::new() is not const.
-// So usage was probably `lazy_static!` or `OnceLock`.
-// If I use `OnceLock`, access is `ACK_RESERVOIR.get_or_init(...).lock()`.
-// Let's check how it's used.
-// Usage: `crate::pubsub::ACK_RESERVOIR.lock()` in `lib.rs`.
-// If it's `OnceLock`, it should be `ACK_RESERVOIR.get().unwrap().lock()`.
-// But `lazy_static` allows direct `.lock()`.
-// I am NOT using `lazy_static`.
-// I should use `std::sync::Mutex` with `once_cell::sync::Lazy` OR just `OnceLock`.
-// But `lib.rs` uses `.lock()`.
-// I'll check `Cargo.toml` again. `once_cell` is there.
-// I will use `once_cell::sync::Lazy`.
-
-
 /// Global counter for bytes currently buffered in the native layer (waiting for Spark to fetch).
 /// This provides visibility into off-heap memory usage.
 static BUFFERED_BYTES: AtomicUsize = AtomicUsize::new(0);
@@ -102,13 +80,6 @@ pub struct PubSubClient {
     /// The full subscription resource name.
     pub subscription_name: String,
 }
-
-// ... (skip create_channel_and_header) is NOT acceptable here. I must provide the function.
-// I need `create_channel_and_header` implementation.
-// I will fetch it from my previous view_file history if possible, or re-implement.
-// From Step 5797, I have the full content.
-
-// COPYING FULL CONTENT FROM STEP 5797 and applying modifications correctly.
 
 impl PubSubClient {
     /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
@@ -412,7 +383,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime, ca_path: Option<Stri
 
 /// Helper to create a gRPC channel and optional Auth header.
 async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
-    eprintln!("Rust: create_channel_and_header called. ca_path: {:?}", ca_path);
+    log::debug!("Rust: create_channel_and_header called. ca_path: {:?}", ca_path);
     let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
     let endpoint = emulator_host.as_ref().map(|h| format!("http://{}", h)).unwrap_or_else(|| "https://pubsub.googleapis.com".to_string());
     
@@ -457,7 +428,7 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
     let header_val = if emulator_host.is_some() {
         None
     } else {
-        eprintln!("Rust: Looking for Application Default Credentials (ADC)...");
+        log::info!("Rust: Looking for Application Default Credentials (ADC)...");
         let config = google_cloud_auth::project::Config {
             scopes: Some(&[
                 "https://www.googleapis.com/auth/cloud-platform",
@@ -466,7 +437,7 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
             ..Default::default()
         };
         let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
-        eprintln!("Rust: ADC Loaded successfully.");
+        log::info!("Rust: ADC Loaded successfully.");
         let token_source = ts.token_source();
         let token = token_source.token().await?;
         
