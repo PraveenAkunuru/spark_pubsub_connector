@@ -40,15 +40,17 @@ class PubSubTableProvider extends TableProvider with DataSourceRegister with org
    * Returns a `PubSubTable` instance configured with the given schema and properties.
    */
   override def getTable(schema: StructType, partitioning: Array[Transform], properties: util.Map[String, String]): Table = {
+    // Fail-Fast: Verify Credentials
+    try {
+      val creds = com.google.auth.oauth2.GoogleCredentials.getApplicationDefault()
+      logInfo(s"Fail-Fast Auth: Successfully loaded credentials (Scopes: ${creds.createScoped("https://www.googleapis.com/auth/cloud-platform").getClass.getSimpleName})")
+    } catch {
+      case e: Throwable =>
+        throw new RuntimeException("Fail-Fast Auth: Failed to load Google Application Default Credentials. check GOOGLE_APPLICATION_CREDENTIALS or gcloud auth.", e)
+    }
+
     val subId = properties.get("subscriptionId")
     if (subId == null || subId.trim.isEmpty) {
-      // Validate write (topicId) or read (subscriptionId)?
-      // getTable is generic. 
-      // Spark V2 doesn't technically distinguish read/write intent at getTable time perfectly, 
-      // but usually we can check context or just be lenient?
-      // Actually, if we require EITHER subscriptionId OR topicId?
-      // But for READ, we need subscriptionId.
-      // Let's check for EITHER.
       val topicId = properties.get("topicId")
       if (topicId == null || topicId.trim.isEmpty) {
          throw new IllegalArgumentException("Missing required option: Must provide either 'subscriptionId' (for read) or 'topicId' (for write).")
