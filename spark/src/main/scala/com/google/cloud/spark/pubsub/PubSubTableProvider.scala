@@ -43,9 +43,12 @@ class PubSubTableProvider extends TableProvider with DataSourceRegister with org
     // Fail-Fast: Verify Credentials
     try {
       val creds = com.google.auth.oauth2.GoogleCredentials.getApplicationDefault()
-      logInfo(s"Fail-Fast Auth: Successfully loaded credentials (Scopes: ${creds.createScoped("https://www.googleapis.com/auth/cloud-platform").getClass.getSimpleName})")
+      val scopes = creds.createScoped("https://www.googleapis.com/auth/cloud-platform").getClass.getSimpleName
+      logInfo(s"Fail-Fast Auth: Successfully loaded credentials (Scopes: $scopes)")
+      println(s"Fail-Fast Auth: Successfully loaded credentials (Scopes: $scopes)")
     } catch {
       case e: Throwable =>
+        println("Fail-Fast Auth: Failed to load Google Application Default Credentials.")
         throw new RuntimeException("Fail-Fast Auth: Failed to load Google Application Default Credentials. check GOOGLE_APPLICATION_CREDENTIALS or gcloud auth.", e)
     }
 
