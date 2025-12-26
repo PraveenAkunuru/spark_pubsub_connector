@@ -1,1 +1,0 @@
-/code/native/target_docker/release/libnative_pubsub_connector.rlib: /code/native/src/arrow_convert/builder.rs /code/native/src/arrow_convert/mod.rs /code/native/src/arrow_convert/reader.rs /code/native/src/lib.rs /code/native/src/logging.rs /code/native/src/pubsub.rs
