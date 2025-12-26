@@ -47,7 +47,7 @@ lazy val commonSettings = Seq(
   envVars in Test := Map(
     "PUBSUB_EMULATOR_HOST" -> sys.env.getOrElse("PUBSUB_EMULATOR_HOST", "localhost:8085")
   ),
-  libraryDependencies += "com.google.cloud" % "google-cloud-core" % "2.33.0",
+  libraryDependencies += "com.google.cloud" % "google-cloud-core" % "2.33.0" exclude("commons-logging", "commons-logging"),
   copyNativeLibs := {
     val log = streams.value.log
     // baseDirectory is modules/spark35, parent is spark, parent parent is root
@@ -104,42 +104,38 @@ lazy val spark33 = (project in file("spark33"))
     Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
   )
 
-lazy val assemblySettings = Seq(
-  assembly / assemblyMergeStrategy := {
-    case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
-    case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-    case x => MergeStrategy.first
-  }
-)
-
 lazy val spark35 = (project in file("spark35"))
   .settings(commonSettings)
   .settings(
     name := "spark-pubsub-connector-3.5",
     scalaVersion := "2.12.18",
     libraryDependencies ++= Seq(
-      "org.apache.spark" %% "spark-core" % "3.5.3" % "provided",
-      "org.apache.spark" %% "spark-sql" % "3.5.3" % "provided",
-      "org.apache.spark" %% "spark-catalyst" % "3.5.3" % "provided",
+      "org.apache.spark" %% "spark-core" % "3.5.3",
+      "org.apache.spark" %% "spark-sql" % "3.5.3",
+      "org.apache.spark" %% "spark-catalyst" % "3.5.3",
       "org.apache.arrow" % "arrow-vector" % "15.0.2",
       "org.apache.arrow" % "arrow-memory-netty" % "15.0.2",
       "org.apache.arrow" % "arrow-c-data" % "15.0.2",
-      "org.scalatest" %% "scalatest" % "3.2.16" % Test,
-      "org.apache.avro" % "avro" % "1.11.3" % Test
-    ),
-    // Force Arrow to use Spark's Jackson versions to prevent binary incompatibility
-    dependencyOverrides ++= Seq(
-      "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
-      "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2",
-      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2"
+      "org.scalatest" %% "scalatest" % "3.2.16" % Test
     ),
     Compile / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "scala",
     Test / unmanagedSourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "scala",
     Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "main" / "resources",
     Test / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "src" / "test" / "resources",
-    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release"
+    Test / javaOptions ++= javaOpts :+ s"-Djava.library.path=${baseDirectory.value.getParentFile.getParentFile}/native/target/release",
+    // Jackson Overrides to match Spark 3.5 expectation and avoid version mismatch errors
+    dependencyOverrides ++= Seq(
+      "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
+      "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2",
+      "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2"
+    ),
+    assembly / assemblyMergeStrategy := {
+      case "org/apache/commons/logging/impl/NoOpLog.class" => MergeStrategy.discard
+      case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+      case PathList("META-INF", xs @ _*) => MergeStrategy.discard
+      case _ => MergeStrategy.first
+    }
   )
-  .settings(assemblySettings)
 
 lazy val spark40 = (project in file("spark40"))
   .settings(commonSettings)

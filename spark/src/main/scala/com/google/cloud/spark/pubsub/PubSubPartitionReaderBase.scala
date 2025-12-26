@@ -23,7 +23,8 @@ abstract class PubSubPartitionReaderBase[T](
   protected val schemaJson: String = PubSubConfig.buildProcessingConfigJson(
     schema, 
     partition.format, 
-    partition.avroSchema
+    partition.avroSchema,
+    partition.caCertificatePath
   )
 
   protected val nativePtr: Long = reader.init(

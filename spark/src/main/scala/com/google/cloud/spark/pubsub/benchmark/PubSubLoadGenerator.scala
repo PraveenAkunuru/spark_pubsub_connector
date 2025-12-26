@@ -2,7 +2,6 @@ package com.google.cloud.spark.pubsub.benchmark
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
-import com.google.cloud.spark.pubsub.PubSubConfig
 
 /**
  * Generates load to Pub/Sub using the Native Connector (Write Path).
@@ -22,7 +21,6 @@ object PubSubLoadGenerator {
     val spark = SparkSession.builder()
       .appName("PubSubLoadGenerator")
       .getOrCreate()
-    import spark.implicits._
 
     println(s"Starting Load Generator: Topic=$topicId, Count=$msgCount, Size=${msgSizeBytes}B")
 

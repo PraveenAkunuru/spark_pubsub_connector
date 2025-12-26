@@ -27,6 +27,5 @@ env_logger = "0.11"
 tokio-stream = "0.1"
 # Pin home crate to avoid edition 2024 issue
 home = "=0.5.9"
-openssl = { version = "0.10" }
 rand = "0.8"
 apache-avro = "0.16"

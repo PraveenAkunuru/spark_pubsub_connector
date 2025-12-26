@@ -35,7 +35,7 @@ object ExecutorDiag {
         StructField("publish_time", TimestampType, true),
         StructField("attributes", StringType, true)
       ))
-      val schemaJson = PubSubConfig.buildProcessingConfigJson(schema, Some("json"), None)
+      val schemaJson = PubSubConfig.buildProcessingConfigJson(schema, Some("json"), None, None)
       
       val loadRes = try {
         NativeLoader.load()

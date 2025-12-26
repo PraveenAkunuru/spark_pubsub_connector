@@ -97,9 +97,10 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       .getOrElse(PubSubConfig.DEFAULT_JITTER_MS).toInt
     val format = PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options, spark)
     val avroSchema = PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options, spark)
+    val caCertificatePath = PubSubConfig.getOption(PubSubConfig.CA_CERTIFICATE_PATH_KEY, options, spark)
 
     (0 until numPartitions).map { i =>
-      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema)
+      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema, caCertificatePath)
     }.toArray
   }
 
@@ -126,7 +127,8 @@ case class PubSubInputPartition(
     batchId: String,
     jitterMillis: Int,
     format: Option[String],
-    avroSchema: Option[String]) extends InputPartition
+    avroSchema: Option[String],
+    caCertificatePath: Option[String]) extends InputPartition
 
 /**
  * Factory class that initializes `PubSubPartitionReader` on the executors.

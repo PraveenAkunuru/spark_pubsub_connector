@@ -15,7 +15,7 @@ class NativeWriter {
    * Initializes the native Publisher client for a specific topic.
    * Returns a raw pointer (Long) to the Rust state.
    */
-  @native def init(projectId: String, topicId: String): Long
+  @native def init(projectId: String, topicId: String, caCertificatePath: String): Long
 
   /**
    * Publishes a batch of data from Arrow memory addresses.

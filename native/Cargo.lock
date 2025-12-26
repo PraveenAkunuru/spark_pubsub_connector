@@ -1686,7 +1686,6 @@ dependencies = [
  "jni",
  "log",
  "once_cell",
- "openssl",
  "prost",
  "prost-types",
  "rand",

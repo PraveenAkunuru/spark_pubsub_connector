@@ -52,19 +52,46 @@ cd spark
 java -jar sbt-launch.jar "spark35/test"
 ```
 
-### 3.3. Integration Testing (Emulator)
-You can run integration tests without hitting real Cloud Pub/Sub using the emulator.
+### 3.3. Layered Testing Strategy
 
-1. **Start Emulator**:
-   ```bash
-   gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
-   ```
-2. **Run Tests with Env Var**:
-   ```bash
-   export PUBSUB_EMULATOR_HOST=localhost:8085
-   cd spark
-   java -jar sbt-launch.jar "spark35/test"
-   ```
+To ensure robust Spark integration, we follow a layered strategy targeting the JNI boundary and Spark engine signals.
+
+#### Layer 1: MemoryStream Logic Validation (JVM)
+Use Spark's internal `MemoryStream` for logic/transformation testing without network I/O.
+- **What it covers**: SQL transformations, stateful aggregations, and business logic.
+- **Simulation**: Test hundreds of scenarios (late data, malformed JSON) in seconds.
+
+#### Layer 2: Boundary Integration (JNI)
+Focus on the hand-off between JVM and Native Rust code.
+- **Schema Consistency**: Verify mapping for Spark types (Timestamp, Map, Binary) to Arrow types.
+- **Pass-Through Test**: Verify that records published to the Emulator remain identical (count, order, types) after crossing the JNI boundary.
+
+#### Layer 3: Lifecycle & Fault Tolerance
+Ensures the Rust layer respects Spark's Checkpointing and Commit protocols.
+- **"Hard Stop" Test**: Force-kill a Spark worker and verify unacked message redelivery (Exactly-Once verification).
+- **Offset Management**: Ensure Spark Batch IDs correctly map to unacked messages in Rust reservoirs.
+
+#### Layer 4: Advanced Spark Power Features
+Target features that rely heavily on the source/sink implementation:
+
+| Feature | Testing Priority | Validation Method |
+| :--- | :--- | :--- |
+| **Watermarking** | High | Verify `withWatermark` drops late messages based on `publish_time`. |
+| **Filter Pushdown** | High | Verify `df.filter(...)` criteria are received by the Rust reader. |
+| **AQE** | Medium | Verify Spark re-optimizes join plans based on connector-reported stats. |
+
+#### Summary Table: Testing Priorities
+| Layer | Tool/Strategy | Main Objective |
+| :--- | :--- | :--- |
+| **Unit** | `mockall` (Rust) / Mockito (Java) | JNI safety & memory leak prevention. |
+| **Integration** | Pub/Sub Emulator | End-to-end data integrity & offset commits. |
+| **Compatibility** | Spark Matrix (3.3 - 4.0) | Cross-version API stability. |
+| **Resilience** | Chaos Injection | Recovery after Executor/Driver failure. |
+
+### 3.4. Automated Emulator Suite (CI/CD)
+The Google Cloud Pub/Sub Emulator is mandated for all integration tests to ensure deterministic results.
+- **Docker**: Run via `gcr.io/google.com/cloudsdktool/cloud-sdk`.
+- **Reliability**: Eliminates cloud latency and quota-related flakes.
 
 ---
 

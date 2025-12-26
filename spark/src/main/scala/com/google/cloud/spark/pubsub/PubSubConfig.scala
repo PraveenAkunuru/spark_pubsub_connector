@@ -31,6 +31,8 @@ object PubSubConfig {
   val FORMAT_KEY = "format"
   /** Optional Avro schema string. */
   val AVRO_SCHEMA_KEY = "avroSchema"
+  /** Optional explicit CA certificate path. */
+  val CA_CERTIFICATE_PATH_KEY = "caCertificatePath"
 
   /**
    * Helper to retrieve a configuration value with the following precedence:
@@ -40,7 +42,17 @@ object PubSubConfig {
    */
   def getOption(key: String, options: Map[String, String], sparkSession: org.apache.spark.sql.SparkSession): Option[String] = {
     options.get(key)
-      .orElse(sparkSession.conf.getOption(s"spark.pubsub.$key"))
+      .orElse {
+        if (sparkSession != null) {
+          try {
+            sparkSession.conf.getOption(s"spark.pubsub.$key")
+          } catch {
+            case _: Throwable => None
+          }
+        } else {
+          None
+        }
+      }
       .orElse {
         if (key == PROJECT_ID_KEY) {
           Option(System.getenv("GOOGLE_CLOUD_PROJECT"))
@@ -63,12 +75,14 @@ object PubSubConfig {
    * @param schema Spark schema for projection.
    * @param format Optional data format.
    * @param avroSchema Optional Avro schema.
+   * @param caCertificatePath Optional path to a CA certificate bundle.
    * @return A JSON string compatible with the Rust `ProcessingConfig`.
    */
   def buildProcessingConfigJson(
       schema: org.apache.spark.sql.types.StructType, 
       format: Option[String], 
-      avroSchema: Option[String]): String = {
+      avroSchema: Option[String],
+      caCertificatePath: Option[String]): String = {
     import org.apache.spark.sql.types._
     val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
     val rootArgs = mapper.createObjectNode()
@@ -93,6 +107,7 @@ object PubSubConfig {
 
     format.foreach(f => rootArgs.put("format", f))
     avroSchema.foreach(s => rootArgs.put("avroSchema", s))
+    caCertificatePath.foreach(p => rootArgs.put("caCertificatePath", p))
 
     mapper.writeValueAsString(rootArgs)
   }

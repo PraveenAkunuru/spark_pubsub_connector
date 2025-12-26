@@ -4,7 +4,16 @@ This document provides a comprehensive overview of the Spark Pub/Sub connector's
 
 ---
 
-## 1. System Overview
+## 1. Design Philosophy: Convention over Configuration
+
+The Spark Pub/Sub Connector is designed to "just work" for 90% of use cases without manual tuning.
+- **Intelligent Defaults**: Parallelism, batching, and authentication are automatically inferred from the environment.
+- **Unified Schema**: A single entry point handles both raw message access and high-performance native JSON/Avro parsing.
+- **ADC-First**: Prioritizes Google Application Default Credentials for seamless GKE/Dataproc integration.
+
+---
+
+## 2. System Overview
 
 The Spark Pub/Sub Connector is a high-performance, native integration between Apache Spark (Structured Streaming) and Google Cloud Pub/Sub. It leverages **Apache Arrow** and **Rust** to achieve near-zero-copy data transfer and low-latency message processing.
 

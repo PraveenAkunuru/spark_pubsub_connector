@@ -11,7 +11,7 @@ import scala.collection.JavaConverters._
  */
 class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) extends WriteBuilder {
   override def build(): Write = {
-    val spark = org.apache.spark.sql.SparkSession.active
+    val spark = org.apache.spark.sql.SparkSession.getActiveSession.getOrElse(null)
     // Resolve mandatory/optional options on the Driver
     val resolvedOptions = Map(
       PubSubConfig.PROJECT_ID_KEY -> PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(""),
@@ -21,7 +21,8 @@ class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) 
       PubSubConfig.MAX_BATCH_BYTES_KEY -> PubSubConfig.getOption(PubSubConfig.MAX_BATCH_BYTES_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("5242880"),
       PubSubConfig.FLUSH_TIMEOUT_MS_KEY -> PubSubConfig.getOption(PubSubConfig.FLUSH_TIMEOUT_MS_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(PubSubConfig.DEFAULT_FLUSH_TIMEOUT_MS.toString),
       PubSubConfig.FORMAT_KEY -> PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("json"),
-      PubSubConfig.AVRO_SCHEMA_KEY -> PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("")
+      PubSubConfig.AVRO_SCHEMA_KEY -> PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse(""),
+      PubSubConfig.CA_CERTIFICATE_PATH_KEY -> PubSubConfig.getOption(PubSubConfig.CA_CERTIFICATE_PATH_KEY, options.asCaseSensitiveMap().asScala.toMap, spark).getOrElse("")
     )
 
     if (resolvedOptions(PubSubConfig.TOPIC_ID_KEY).isEmpty) {
@@ -73,6 +74,8 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   
   private val projectId = options.getOrElse(PubSubConfig.PROJECT_ID_KEY, "")
   private val topicId = options.getOrElse(PubSubConfig.TOPIC_ID_KEY, "")
+  private val caCertificatePath = options.get(PubSubConfig.CA_CERTIFICATE_PATH_KEY).filter(_.nonEmpty)
+  
   private val batchSizeRaw = options.getOrElse(PubSubConfig.BATCH_SIZE_KEY, PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
   private val batchSize = if (batchSizeRaw > 1000) {
     logWarning(s"Configured batchSize $batchSizeRaw exceeds Pub/Sub limit of 1000. Capping at 1000.")
@@ -89,7 +92,7 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private val writer = new NativeWriter()
   logInfo(s"PubSubDataWriter created for $projectId/$topicId, partitionId: $partitionId, taskId: $taskId")
   
-  private val nativePtr = writer.init(projectId, topicId)
+  private val nativePtr = writer.init(projectId, topicId, caCertificatePath.getOrElse(""))
   if (nativePtr == 0) {
     throw new RuntimeException("Failed to initialize native Pub/Sub writer.")
   }

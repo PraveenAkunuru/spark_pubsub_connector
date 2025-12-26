@@ -23,12 +23,25 @@ This roadmap outlines the planned enhancements for the Spark Pub/Sub Connector, 
 **Goal**: Prevent native resource leaks during unexpected Spark task failures.
 - **Implementation**: Integrate JVM `Cleaner` or `ShutdownHook` in `NativeReader` to guarantee `close(nativePtr)` is called if the standard Spark lifecycle methods are bypassed.
 
+### 5. Convention over Configuration (UX)
+**Goal**: Reduce the configuration surface to essential keys for production.
+- **Unified Schema Intelligence**: Automatically switch between raw and structured modes based on presence of `.schema()`.
+- **Intelligent Default Parallelism**: Benchmarked to 2x total executor cores by default.
+- **Zero-Config Authenticion**: Hardened ADC-first path for cloud environments.
+
+### 4. Lifecycle & Fault Tolerance (Exactly-Once)
+**Goal**: Ensuring zero data loss or duplication during executor failures.
+- **"Hard Stop" Recovery**: Implement chaos tests that kill executors during a Spark batch and verify state recovery from checkpoints.
+- **Offset/Reservoir Sync**: Optimize the native `AckReservoir` to guarantee it never acknowledges messages until Spark's commit signal is finalized.
+
 ---
 
 ## Planned Optimizations
 
 | Area | Issue | Proposed Fix |
 | :--- | :--- | :--- |
+| **Watermarking** | Latency in watermark advancement. | Pass `max_publish_time` for each batch from Rust to Spark to allow eager watermark progression. |
+| **Filter Pushdown** | Excessive data egress for small filters. | Implement `SupportsPushDownFilters` in Spark and map SQL `BinaryComparison` to native filter logic. |
 | **Attribute Mapping** | Iterative HashMap construction in Scala is slow. | Optimize `ArrowBatchReader` conversion logic. |
 | **Flush Timeout** | Sink `close()` might hang if the network is stalled. | Add a configurable timeout to the native flush signal. |
 | **FFI Safety** | Manual pointer management is error-prone. | Move to a higher-level JNI abstraction if overhead permits. |
@@ -54,3 +67,4 @@ This roadmap outlines the planned enhancements for the Spark Pub/Sub Connector, 
 **Goal**: Ensure compatibility across varied Dataproc/Linux environments.
 - **GLIBC Versioning**: Rename native libraries to include GLIBC version (e.g., `libnative-pubsub-glibc2.31.so`) to clarify compatibility targets.
 - **Smoke Tests**: Add a "Smoke Test" phase that verifies IAM permissions and native loading *before* launching heavy Spark tasks.
+- **Automated Emulator CI/CD**: Standardize use of the Google Cloud Pub/Sub Emulator in the build pipeline.

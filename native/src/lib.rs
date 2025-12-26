@@ -93,13 +93,12 @@ where
 #[bridge]
 mod jni {
     use crate::pubsub::PubSubClient;
-    use crate::arrow_convert::ArrowBatchBuilder;
     use robusta_jni::convert::{Signature, IntoJavaValue, FromJavaValue, TryIntoJavaValue, TryFromJavaValue};
     use robusta_jni::jni::JNIEnv;
     use robusta_jni::jni::objects::AutoLocal;
     use robusta_jni::jni::sys::jlong;
     use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
-    use arrow::array::{Array, StructArray};
+    use arrow::array::{StructArray, Array};
     
     /// JNI wrapper for `NativeReader` on the Scala side.
     /// Manages message ingestion from Pub/Sub and conversion to Arrow batches.
@@ -127,43 +126,56 @@ mod jni {
                 }
 
                 // Parse configuration and schema
-                let (arrow_schema, format, avro_schema) = if !schema_json.is_empty() {
+                let config = if !schema_json.is_empty() {
                     // Heuristic: If starts with '[', it's legacy array schema
                     if schema_json.trim_start().starts_with('[') {
                          let s = crate::arrow_convert::parse_simple_schema(&schema_json);
                          log::info!("Rust: Detected legacy schema parsing.");
-                         (s, crate::arrow_convert::DataFormat::Json, None)
+                         crate::arrow_convert::ProcessingConfig {
+                             arrow_schema: s,
+                             format: crate::arrow_convert::DataFormat::Json,
+                             avro_schema: None,
+                             ca_certificate_path: None,
+                         }
                     } else {
                         match crate::arrow_convert::parse_processing_config(&schema_json) {
-                            Ok(c) => (c.arrow_schema, c.format, c.avro_schema),
+                            Ok(c) => c,
                             Err(e) => {
                                 log::warn!("Rust: Failed to parse processing config: {}", e);
-                                (None, crate::arrow_convert::DataFormat::Json, None)
+                                crate::arrow_convert::ProcessingConfig {
+                                    arrow_schema: None,
+                                    format: crate::arrow_convert::DataFormat::Json,
+                                    avro_schema: None,
+                                    ca_certificate_path: None,
+                                }
                             }
                         }
                     }
                 } else {
-                    (None, crate::arrow_convert::DataFormat::Json, None)
+                    crate::arrow_convert::ProcessingConfig {
+                        arrow_schema: None,
+                        format: crate::arrow_convert::DataFormat::Json,
+                        avro_schema: None,
+                        ca_certificate_path: None,
+                    }
                 };
 
-                // Use Global Runtime
                 let rt = crate::pubsub::get_runtime();
                 
-                // Create Publisher Client
                 let client_res = rt.block_on(async {
-                    PubSubClient::new(&project_id, &subscription_id).await
+                    PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
                 });
 
                 match client_res {
                     Ok(client) => {
-                        crate::pubsub::start_deadline_manager(rt);
+                        crate::pubsub::start_deadline_manager(rt, config.ca_certificate_path.clone());
 
                         let reader = Box::new(crate::RustPartitionReader {
                             rt,
                             client,
-                            schema: arrow_schema,
-                            format,
-                            avro_schema,
+                            schema: config.arrow_schema,
+                            format: config.format,
+                            avro_schema: config.avro_schema,
                         });
                         log::info!("Rust: NativeReader.init success. Pointer: {:?}", reader.as_ref() as *const _);
                         Box::into_raw(reader) as jlong
@@ -177,103 +189,79 @@ mod jni {
             })
         }
 
-        /// Fetches the next batch of messages from the background queue, converts them to an Arrow batch,
-        /// and exports them directly into the memory addresses provided by Spark (out_array, out_schema).
-        /// Returns 1 if a batch was produced, 0 if no messages are available, or a negative error code.
-        pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, out_array: jlong, out_schema: jlong) -> i32 {
+        /// Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.
+        /// Returns 1 if messages were fetched, 0 if empty, or negative on error.
+        pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, arrow_array_addr: jlong, arrow_schema_addr: jlong) -> i32 {
             crate::safe_jni_call(-100, || {
-                if reader_ptr == 0 {
-                    return -1;
-                }
-                // SAFETY: Java side provides valid pointers to FFI structures
+                if reader_ptr == 0 { return -1; }
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
-                
-                log::info!("Rust: getNextBatch called for batch: {}", &batch_id);
-                let msgs = match reader.rt.block_on(async {
-                    reader.client.fetch_batch(1000).await
-                }) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::error!("Rust: fetch_batch failed: {}", e);
-                        return -5; // Error code for permanent failure / channel closed
-                    }
-                };
-                
-                if msgs.is_empty() {
-                    return 0;
-                }
 
-                // Store Ack IDs in the native reservoir before exporting to Arrow
-                let ack_ids: Vec<String> = msgs.iter().map(|m| m.ack_id.clone()).collect();
-                {
-                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                    let entry = reservoir.entry(batch_id.clone())
-                        .or_insert_with(|| (tokio::time::Instant::now(), std::collections::HashMap::new()));
-                    entry.1.entry(reader.client.subscription_name.clone())
-                        .or_insert_with(Vec::new)
-                        .extend(ack_ids);
-                }
-
-                let mut builder = ArrowBatchBuilder::new(reader.schema.clone(), reader.format, reader.avro_schema.clone());
-                for msg in msgs {
-                    builder.append(&msg);
-                }
-                
-                let (arrays, schema) = builder.finish();
-                
-                let batch = match arrow::record_batch::RecordBatch::try_new(schema, arrays) {
-                    Ok(b) => b,
+                // Blocking fetch from native buffer (with short timeout)
+                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(100).await }) {
+                    Ok(msgs) => msgs,
                     Err(e) => {
-                        log::error!("Rust: Failed to create RecordBatch: {:?}", e);
+                        log::error!("Rust: fetch_batch failed: {:?}", e);
                         return -2;
                     }
                 };
-                
-                // Convert to FFI structs via StructArray
-                let struct_array = StructArray::from(batch);
-                let (array_val, schema_val) = match arrow::ffi::to_ffi(&struct_array.into_data()) {
-                    Ok(ffi) => ffi,
-                    Err(e) => {
-                        log::error!("Rust: Failed to export to FFI: {:?}", e);
-                        return -3;
-                    }
-                };
 
-                // Write to C pointers provided by Java
-                let out_array_ptr = out_array as *mut FFI_ArrowArray;
-                let out_schema_ptr = out_schema as *mut FFI_ArrowSchema;
-
-                // SAFETY: We write to the provided pointers using the C Data Interface.
-                unsafe {
-                    std::ptr::write(out_array_ptr, array_val);
-                    std::ptr::write(out_schema_ptr, schema_val);
+                if messages.is_empty() {
+                    return 0;
                 }
-                
-                log::info!("Rust: getNextBatch returning success (1) for batch: {}", &batch_id);
+
+                // Convert to Arrow
+                let mut builder = crate::arrow_convert::ArrowBatchBuilder::new(
+                    reader.schema.clone(),
+                    reader.format,
+                    reader.avro_schema.clone()
+                );
+
+                let mut ack_ids = Vec::with_capacity(messages.len());
+                for msg in &messages {
+                    builder.append(msg);
+                    ack_ids.push(msg.ack_id.clone());
+                }
+
+                // Register batch in Ack Reservoir
+                {
+                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
+                    let batch_map = reservoir.entry(batch_id).or_insert_with(|| (crate::pubsub::ack_reservoir_instant_now(), std::collections::HashMap::new()));
+                    batch_map.1.insert(reader.client.subscription_name.clone(), ack_ids);
+                }
+
+                let (arrays, schema) = builder.finish();
+                let struct_array = arrow::array::StructArray::from(arrow::array::ArrayData::from(
+                    arrow::array::StructArray::try_from(arrow::record_batch::RecordBatch::try_new(schema, arrays).unwrap()).unwrap()
+                ));
+
+                // Export to FFI
+                unsafe {
+                    let array_ptr = arrow_array_addr as *mut FFI_ArrowArray;
+                    let schema_ptr = arrow_schema_addr as *mut FFI_ArrowSchema;
+                    
+                    let data = struct_array.to_data();
+                    let ffi_array = FFI_ArrowArray::new(&data);
+                    let ffi_schema = FFI_ArrowSchema::try_from(data.data_type()).unwrap();
+
+                    std::ptr::write(array_ptr, ffi_array);
+                    std::ptr::write(schema_ptr, ffi_schema);
+                }
+
                 1
             })
         }
 
-        // Removed storeAcksFromArrow because ack storage is now integrated into getNextBatch
-
-        /// Sends an asynchronous Acknowledgment request for a list of message IDs.
-        /// This is used for "At-Least-Once" delivery guarantees in Spark.
+        /// Sends an asynchronous Acknowledgment request for the given list of message IDs.
         pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids: Vec<String>) -> i32 {
-            crate::safe_jni_call(0, || {
-                if reader_ptr == 0 {
-                    return -1;
-                }
-                let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
-                
-                let res = reader.rt.block_on(async {
-                    reader.client.acknowledge(ack_ids).await
-                });
-                
-                match res {
+            crate::safe_jni_call(-100, || {
+                if reader_ptr == 0 { return -1; }
+                let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
+
+                match reader.rt.block_on(async { reader.client.acknowledge(ack_ids).await }) {
                     Ok(_) => 1,
                     Err(e) => {
-                        log::error!("Rust: Failed to acknowledge batch: {:?}", e);
-                        0
+                        log::error!("Rust: acknowledge failed: {:?}", e);
+                        -2
                     }
                 }
             })
@@ -282,49 +270,45 @@ mod jni {
         /// Flushes the native reservoir for the given committed batches.
         pub extern "jni" fn ackCommitted(self, _env: &JNIEnv, reader_ptr: jlong, batch_ids: Vec<String>) -> i32 {
             crate::safe_jni_call(-100, || {
-                if reader_ptr == 0 || batch_ids.is_empty() { return 1; }
-                let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
-                
-                let mut to_ack = Vec::new();
+                if reader_ptr == 0 { return -1; }
+                let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
+
+                let mut all_ack_ids = Vec::new();
                 {
                     let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                     for id in batch_ids {
-                        if let Some((_, subs)) = reservoir.get_mut(&id) {
+                        if let Some((_, mut subs)) = reservoir.remove(&id) {
                             if let Some(ids) = subs.remove(&reader.client.subscription_name) {
-                                to_ack.extend(ids);
+                                all_ack_ids.extend(ids);
                             }
                         }
                     }
-                    // Cleanup empty batches
-                    reservoir.retain(|_, (_, subs)| !subs.is_empty());
                 }
 
-                if to_ack.is_empty() { return 1; }
+                if all_ack_ids.is_empty() { return 0; }
 
-                let res = reader.rt.block_on(async {
-                    reader.client.acknowledge(to_ack).await
-                });
-                
-                if res.is_ok() { 1 } else { 0 }
-            })
-        }
-
-        pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
-            crate::safe_jni_call(-1, || {
-                let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                let mut count = 0;
-                for (_batch, (_, subs)) in reservoir.iter() {
-                    for (_sub, ids) in subs {
-                        count += ids.len();
+                match reader.rt.block_on(async { reader.client.acknowledge(all_ack_ids).await }) {
+                    Ok(_) => 1,
+                    Err(e) => {
+                        log::error!("Rust: ackCommitted failed: {:?}", e);
+                        -2
                     }
                 }
-                count as i32
             })
         }
 
-        pub extern "jni" fn getNativeMemoryUsage(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(-1, || {
-                 crate::pubsub::get_buffered_bytes()
+        /// Returns the count of messages currently held in the off-heap Ack Reservoir.
+        pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
+            crate::safe_jni_call(0, || {
+                let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
+                reservoir.values().map(|(_, subs)| subs.values().map(|v| v.len()).sum::<usize>()).sum::<usize>() as i32
+            })
+        }
+
+        /// Returns the estimated size (bytes) of messages buffered in the native layer (off-heap).
+        pub extern "jni" fn getNativeMemoryUsage(self, _env: &JNIEnv) -> jlong {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_buffered_bytes() as jlong
             })
         }
 
@@ -351,7 +335,7 @@ mod jni {
     impl<'env: 'borrow, 'borrow> NativeWriter<'env, 'borrow> {
         /// Initializes a new `PublisherClient` with the given project and topic.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionWriter`.
-        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String) -> jlong {
+        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String, ca_certificate_path: String) -> jlong {
             crate::safe_jni_call(0, || {
                 // Guideline 4: Staggered Initialization
                 // Initialize logging (safe to call multiple times)
@@ -364,8 +348,14 @@ mod jni {
 
                 let rt = crate::pubsub::get_runtime();
                 
+                let ca_path = if ca_certificate_path.is_empty() {
+                    None
+                } else {
+                    Some(ca_certificate_path.as_str())
+                };
+
                 let client_res = rt.block_on(async {
-                    crate::pubsub::PublisherClient::new(&project_id, &topic_id).await
+                    crate::pubsub::PublisherClient::new(&project_id, &topic_id, ca_path).await
                 });
 
                 match client_res {

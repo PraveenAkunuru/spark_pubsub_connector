@@ -18,12 +18,15 @@ use std::sync::Arc;
 
 #[derive(serde::Deserialize, Debug)]
 pub struct SimpleField {
+    #[allow(dead_code)] // Used by serde for deserialization
     name: String,
     #[serde(rename = "type")]
+    #[allow(dead_code)] // Used by serde for deserialization
     type_name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DataFormat {
     Json,
     Avro,
@@ -33,24 +36,28 @@ pub struct ProcessingConfig {
     pub arrow_schema: Option<Arc<Schema>>,
     pub format: DataFormat,
     pub avro_schema: Option<apache_avro::Schema>,
+    pub ca_certificate_path: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
 struct ConfigDto {
+    #[allow(dead_code)] // Used by serde for deserialization
     columns: Option<Vec<SimpleField>>,
-    format: Option<String>,
+    #[allow(dead_code)] // Used by serde for deserialization
+    format: Option<DataFormat>,
     #[serde(rename = "avroSchema")]
+    #[allow(dead_code)] // Used by serde for deserialization
     avro_schema: Option<String>,
+    #[serde(rename = "caCertificatePath")]
+    #[allow(dead_code)] // Used by serde for deserialization
+    ca_certificate_path: Option<String>,
 }
 
 pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
     // Try to parse as ConfigDto
     let config: ConfigDto = serde_json::from_str(json).map_err(|e| e.to_string())?;
 
-    let format = match config.format.as_deref() {
-        Some("avro") => DataFormat::Avro,
-        _ => DataFormat::Json,
-    };
+    let format = config.format.unwrap_or(DataFormat::Json);
 
     let arrow_schema = if let Some(cols) = config.columns {
         let arrow_fields: Vec<Field> = cols
@@ -87,6 +94,7 @@ pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
         arrow_schema,
         format,
         avro_schema,
+        ca_certificate_path: config.ca_certificate_path,
     })
 }
 

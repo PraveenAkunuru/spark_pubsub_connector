@@ -28,6 +28,49 @@ use tokio::runtime::Runtime;
 
 static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
+/// Global connection pool to reuse gRPC channels across readers/writers.
+/// Key: Endpoint URL (e.g. "https://pubsub.googleapis.com")
+static CONNECTION_POOL: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<String, Channel>>> = once_cell::sync::Lazy::new(|| {
+    std::sync::Mutex::new(std::collections::HashMap::new())
+});
+
+type AckReservoir = std::sync::Mutex<
+    std::collections::HashMap<
+        String,
+        (Instant, std::collections::HashMap<String, Vec<String>>),
+    >,
+>;
+
+pub static ACK_RESERVOIR: once_cell::sync::Lazy<AckReservoir> = once_cell::sync::Lazy::new(|| {
+    std::sync::Mutex::new(std::collections::HashMap::new())
+});
+
+pub fn ack_reservoir_instant_now() -> Instant {
+    Instant::now()
+}
+
+// Helper to access pool safely
+// fn get_connection_pool() -> &'static std::sync::Mutex<std::collections::HashMap<String, Channel>> {
+//     &CONNECTION_POOL
+// }
+
+// Helper to access reservoir safely (though we use public static usually, keeping this for consistency if needed)
+// Actually, code uses ACK_RESERVOIR directly. I should make sure it initializes it or lazy initializes.
+// The code uses `ACK_RESERVOIR.lock()` which implies it's a Mutex, NOT a OnceLock<Mutex>.
+// Wait, typically Mutex::new() is not const.
+// So usage was probably `lazy_static!` or `OnceLock`.
+// If I use `OnceLock`, access is `ACK_RESERVOIR.get_or_init(...).lock()`.
+// Let's check how it's used.
+// Usage: `crate::pubsub::ACK_RESERVOIR.lock()` in `lib.rs`.
+// If it's `OnceLock`, it should be `ACK_RESERVOIR.get().unwrap().lock()`.
+// But `lazy_static` allows direct `.lock()`.
+// I am NOT using `lazy_static`.
+// I should use `std::sync::Mutex` with `once_cell::sync::Lazy` OR just `OnceLock`.
+// But `lib.rs` uses `.lock()`.
+// I'll check `Cargo.toml` again. `once_cell` is there.
+// I will use `once_cell::sync::Lazy`.
+
+
 /// Global counter for bytes currently buffered in the native layer (waiting for Spark to fetch).
 /// This provides visibility into off-heap memory usage.
 static BUFFERED_BYTES: AtomicUsize = AtomicUsize::new(0);
@@ -69,9 +112,9 @@ pub struct PubSubClient {
 
 impl PubSubClient {
     /// Creates a new `PubSubClient`, establishes a gRPC channel, and spawns the background stream task.
-    pub async fn new(project_id: &str, subscription_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(project_id: &str, subscription_id: &str, ca_path: Option<&str>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         log::info!("Rust: PubSubClient::new called for project: {}, subscription: {}", project_id, subscription_id);
-        let (channel, header_val) = create_channel_and_header().await?;
+        let (channel, header_val) = create_channel_and_header(ca_path).await?;
 
         let full_sub_name = if subscription_id.contains("/subscriptions/") {
             subscription_id.to_string()
@@ -94,6 +137,7 @@ impl PubSubClient {
             Ok(_) => {
                 log::info!("Rust: Subscription validated: {}", full_sub_name);
             },
+            // ... matches existing logic ...
             Err(e) => {
                 log::error!("Rust: Subscription validation failed: {:?}", e);
                 return Err(Box::new(e));
@@ -197,8 +241,20 @@ impl PubSubClient {
                         log::warn!("Rust: StreamingPull stream ended. Retrying...");
                     },
                     Err(e) => {
-                        log::warn!("Rust: StreamingPull failed: {:?}. Retrying in {}s", e, backoff_secs);
-                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                        let code = e.code();
+                        let mut backoff_millis = backoff_secs * 1000;
+                        
+                        if code == tonic::Code::ResourceExhausted {
+                            log::warn!("Rust: StreamingPull quota exceeded (RESOURCE_EXHAUSTED). Using aggressive backoff.");
+                            backoff_millis *= 2;
+                        }
+
+                        // Add jitter (±20%)
+                        let jitter = rand::Rng::gen_range(&mut rand::thread_rng(), 0.8..1.2);
+                        let sleep_ms = (backoff_millis as f64 * jitter) as u64;
+
+                        log::warn!("Rust: StreamingPull failed: {:?}. Retrying in {}ms", e, sleep_ms);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)).await;
                         backoff_secs = std::cmp::min(backoff_secs * 2, 60);
                     }
                 }
@@ -211,72 +267,98 @@ impl PubSubClient {
             subscription_name: full_sub_name,
         })
     }
-
-    /// Drains up to `batch_size` messages from the internal buffer.
-    pub async fn fetch_batch(&mut self, batch_size: usize) -> Result<Vec<ReceivedMessage>, String> {
-        let mut batch = Vec::with_capacity(batch_size);
-        while batch.len() < batch_size {
-             match tokio::time::timeout(Duration::from_millis(3000), self.receiver.recv()).await {
-                 Ok(Some(msg)) => {
-                     log::info!("Rust: Passing message to Spark: {}", msg.ack_id);
-                     batch.push(msg);
-                 },
-                 Ok(None) => {
-                     log::error!("Rust: Receiver channel closed (background task died).");
-                     if batch.is_empty() {
-                         return Err("Background task died".to_string());
-                     }
-                     break; 
-                 },
-                 Err(_) => break, // timeout
-             }
-        }
-        log::info!("Rust: fetch_batch returning {} messages", batch.len());
-        Ok(batch)
-    }
     
-    /// Queues a list of Ack IDs for acknowledgment via the background `StreamingPull` stream.
-    pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        log::debug!("Rust: Sending ack request for {} ids", ack_ids.len());
-        if ack_ids.is_empty() {
-            return Ok(());
+    /// Fetches a batch of messages from the internal buffer.
+    /// Waits up to `wait_ms` for the first message, then drains available messages.
+    pub async fn fetch_batch(&mut self, wait_ms: u64) -> Result<Vec<ReceivedMessage>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut messages = Vec::new();
+        
+        let deadline = Instant::now() + Duration::from_millis(wait_ms);
+        
+        // Block for at least one message or timeout
+        match tokio::time::timeout_at(deadline, self.receiver.recv()).await {
+            Ok(Some(msg)) => messages.push(msg),
+             Ok(None) => return Err("Channel closed".into()),
+            Err(_) => return Ok(Vec::new()), // Timeout
         }
+        
+        // Drain additional available messages without blocking
+        while messages.len() < 1000 {
+            match self.receiver.try_recv() {
+                Ok(msg) => messages.push(msg),
+                Err(_) => break,
+            }
+        }
+        
+        // INSTRUMENTATION: Deduct from global buffer size safely
+        // Note: fetch_batch is single-threaded per reader, but BUFFERED_BYTES is global.
+        // We already decremented when moving from pending_messages to rx in the background task?
+        // Wait, the background task decrements when it sends to `self.receiver`.
+        // So `fetch_batch` doesn't need to decrement BUFFERED_BYTES.
+        // The message is "buffered" when it is in `pending_messages` OR `self.receiver`.
+        // The background task increments when received from gRPC.
+        // It should decrement when *Spark consumes it*?
+        // No, `BUFFERED_BYTES` tracks native memory usage.
+        // If it's in `self.receiver` (channel), it's still in native memory.
+        // If passed to Spark, it moves to JVM (or copied to Arrow buffer).
+        // The `fetch_batch` moves it out of `self.receiver`.
+        // The background task decremented it when popping from `pending_messages` and sending to `rx`?
+        // Let's check the background task logic in `new`.
+        // Line 188: `BUFFERED_BYTES.fetch_sub(size, Ordering::Relaxed);` when sending to `permit` (rx).
+        // So `BUFFERED_BYTES` only counts what is in `pending_messages` deque?
+        // Yes, that seems to be the logic implemented.
+        // Messages in the channel (rx) are technically buffered too, but the channel has a limit (1000).
+        // So the unbounded growth risk is `pending_messages`.
+        // So this is fine.
+
+        Ok(messages)
+    }
+
+    /// Sends acknowledgments for the given message IDs.
+    pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if ack_ids.is_empty() { return Ok(()); }
         let req = StreamingPullRequest {
             ack_ids,
+            // other fields empty
             ..Default::default()
         };
-        // We use the sender to send this request into the stream
-        self.sender.send(req).await.map_err(|e| format!("Failed to send Ack request: {}", e))?;
-        log::debug!("Rust: Ack request sent to stream");
-        Ok(())
+        // We use the same sender channel to send acks back to the streaming loop?
+        // Wait, `self.sender` is `ext_tx`.
+        // The background loop listens on `ext_rx`.
+        // It forwards `ext_req` to `grpc_tx`.
+        // YES.
+        self.sender.send(req).await.map_err(|e| format!("Failed to send ack: {}", e).into())
     }
+
+    // IMPORTANT: deadline manager needs update too OR just use default channel?
+    // Deadline manager uses default for now, but should ideally reuse channel or use same CA.
+    // For now I won't change deadline manager to complicate things unless I pass CA logic globally?
+    // Wait, deadline manager `start_deadline_manager` needs to know about CA too if it creates new channels?
+    // Yes. It calls `create_channel_and_header().await`.
+    // I should probably make `create_channel_and_header` optional arg.
+    // AND I should probably update `start_deadline_manager` to take optional CA path?
+    // BUT `start_deadline_manager` is spawned once globally.
+    // If different readers have different CA paths (unlikely in Spark executor), it's problematic.
+    // Assume single CA path per executor for now?
+    // Or just let deadline manager fail for custom CA for now? No, that's bad.
+    // Actually, `CONNECTION_POOL` is global.
+    // If I use different CA paths, I can't easily cache by endpoint alone.
+    // But usually CA path is global env config.
+    // I will change `start_deadline_manager` to accept `ca_path: Option<String>` (owned).
+    
+    // ... skipping to create_channel_and_header ...
+
 }
 
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::Mutex;
-
-/// Global connection pool to share gRPC channels across multiple JNI instances.
-static CONNECTION_POOL: Lazy<Mutex<HashMap<String, Channel>>> = Lazy::new(|| {
-    Mutex::new(HashMap::new())
-});
-
-/// Type alias for the off-heap reservoir structure.
-type AckReservoirMap = HashMap<String, (Instant, HashMap<String, Vec<String>>)>;
-
-/// Global off-heap reservoir for ack_ids waiting for Spark commit signals.
-pub(crate) static ACK_RESERVOIR: Lazy<Mutex<AckReservoirMap>> = Lazy::new(|| {
-    Mutex::new(HashMap::new())
-});
-
-/// Starts the background deadline manager.
-pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
+// Deadline Manager needs update
+pub fn start_deadline_manager(rt: &tokio::runtime::Runtime, ca_path: Option<String>) {
     log::info!("Rust: Starting background deadline manager for runtime");
-    rt.spawn(async {
+    rt.spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             
             let snapshot: Vec<(String, Vec<String>)> = {
+                 // ... existing reservoir logic ...
                 let mut reservoir = ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                 
                 // 1. Purge entries older than 30 minutes (prevent OOM from abandoned batches)
@@ -298,7 +380,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
             };
 
             for (sub, ids) in snapshot {
-                let (channel, header_val) = match create_channel_and_header().await {
+                let (channel, header_val) = match create_channel_and_header(ca_path.as_deref()).await {
                     Ok(res) => res,
                     Err(e) => {
                         log::warn!("Rust DeadlineMgr: Failed to get channel: {:?}", e);
@@ -307,9 +389,9 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
                 };
                 
                 let mut client = SubscriberClient::new(channel);
-                // Chunk ack_ids to avoid 512KB request limit (InvalidArgument)
                 for chunk in ids.chunks(500) {
-                    let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
+                     // ... existing ack logic ...
+                     let req = google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest {
                         subscription: sub.clone(),
                         ack_ids: chunk.to_vec(),
                         ack_deadline_seconds: 30, // Extend by 30s
@@ -329,14 +411,24 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime) {
 }
 
 /// Helper to create a gRPC channel and optional Auth header.
-async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
+async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
     let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
     let endpoint = emulator_host.as_ref().map(|h| format!("http://{}", h)).unwrap_or_else(|| "https://pubsub.googleapis.com".to_string());
     
     // Check pool first
+    // Note: If ca_path varies, pooling by endpoint key alone is RISKY.
+    // However, in Spark, all readers usually share same config.
+    // Ideally key should include ca_path hash.
+    // For now, I'll append ca_path to key if present?
+    let pool_key = if let Some(p) = ca_path {
+        format!("{}|{}", endpoint, p)
+    } else {
+        endpoint.clone()
+    };
+    
     let channel = {
         let pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
-        pool.get(&endpoint).cloned()
+        pool.get(&pool_key).cloned()
     };
 
     let channel = if let Some(ch) = channel {
@@ -346,16 +438,18 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
         let mut endpoint_builder = Channel::from_shared(endpoint.clone())?;
         if emulator_host.is_none() {
             let mut tls_config = ClientTlsConfig::new();
-            // Try to load system CA explicitly to resolve UnknownIssuer on some platforms
-            if let Ok(ca_data) = std::fs::read("/etc/ssl/certs/ca-certificates.crt") {
-                log::info!("Rust: Loading explicit CA roots from /etc/ssl/certs/ca-certificates.crt");
-                tls_config = tls_config.ca_certificate(Certificate::from_pem(ca_data));
+            
+            if let Some(path) = ca_path {
+                 log::info!("Rust: Loading explicit CA roots from {}", path);
+                 let ca_data = std::fs::read(path).map_err(|e| format!("Failed to read CA file {}: {}", path, e))?;
+                 tls_config = tls_config.ca_certificate(Certificate::from_pem(ca_data));
             }
+            // User feedback: relying on standard library (tonic/rustls-native-certs) for system defaults.
             endpoint_builder = endpoint_builder.tls_config(tls_config)?;
         }
         let ch = endpoint_builder.connect().await?;
         let mut pool = CONNECTION_POOL.lock().unwrap_or_else(|e| e.into_inner());
-        pool.insert(endpoint, ch.clone());
+        pool.insert(pool_key, ch.clone());
         ch
     };
 
@@ -385,23 +479,20 @@ async fn create_channel_and_header() -> Result<(Channel, Option<MetadataValue<to
     Ok((channel, header_val))
 }
 
-/// Command sent to the background publisher task.
 enum WriterCommand {
     Publish(Vec<PubsubMessage>),
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
-/// High-performance publisher client that sends batches of messages via gRPC.
 pub struct PublisherClient {
-    tx: Sender<WriterCommand>,
+    tx: tokio::sync::mpsc::Sender<WriterCommand>,
 }
 
 impl PublisherClient {
-    pub async fn new(project_id: &str, topic_id: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let (channel, header_val) = create_channel_and_header().await?;
+    pub async fn new(project_id: &str, topic_id: &str, ca_path: Option<&str>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let (channel, header_val) = create_channel_and_header(ca_path).await?;
         let mut client = google_cloud_googleapis::pubsub::v1::publisher_client::PublisherClient::new(channel);
         
-        // ... (existing helper for topic name)
         let full_topic_name = if topic_id.contains('/') {
             topic_id.to_string()
         } else {
@@ -440,14 +531,24 @@ impl PublisherClient {
                                     break;
                                 }, 
                                 Err(e) => {
+                                    // ... Error handling ...
                                     let code = e.code();
                                     if code == tonic::Code::NotFound || code == tonic::Code::PermissionDenied || code == tonic::Code::InvalidArgument {
                                         log::error!("Rust: Fatal Publish Error: {:?}. Stopping background task.", e);
                                         return; 
                                     }
+                                    let mut actual_backoff = backoff_millis;
+                                    if code == tonic::Code::ResourceExhausted {
+                                        log::warn!("Rust: Quota exceeded (RESOURCE_EXHAUSTED). Using aggressive backoff.");
+                                        actual_backoff *= 2; // Extra multiplier for quota issues
+                                    }
 
-                                    log::warn!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, backoff_millis);
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_millis)).await;
+                                    // Add jitter (±20%)
+                                    let jitter = rand::Rng::gen_range(&mut rand::thread_rng(), 0.8..1.2);
+                                    let sleep_ms = (actual_backoff as f64 * jitter) as u64;
+
+                                    log::warn!("Rust: Async Publish failed: {:?}. Retrying in {}ms", e, sleep_ms);
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)).await;
                                     backoff_millis = std::cmp::min(backoff_millis * 2, max_backoff);
                                 }
                             }
