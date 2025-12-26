@@ -118,6 +118,7 @@ mod jni {
                 // Initialize JNI logging (safe to call multiple times)
                 crate::logging::init(env);
                 log::info!("Rust: NativeReader.init called for project: {}", project_id);
+                eprintln!("Rust: NativeReader.init called for project: {}, sub: {}", project_id, subscription_id);
 
                 if jitter_millis > 0 {
                     let mut rng = rand::thread_rng();
@@ -163,11 +164,13 @@ mod jni {
                 let rt = crate::pubsub::get_runtime();
                 
                 let client_res = rt.block_on(async {
+                    eprintln!("Rust: Calling PubSubClient::new...");
                     PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
                 });
 
                 match client_res {
                     Ok(client) => {
+                        eprintln!("Rust: PubSubClient::new SUCCESS");
                         crate::pubsub::start_deadline_manager(rt, config.ca_certificate_path.clone());
 
                         let reader = Box::new(crate::RustPartitionReader {
@@ -176,13 +179,18 @@ mod jni {
                             schema: config.arrow_schema,
                             format: config.format,
                             avro_schema: config.avro_schema,
+                            project_id,
+                            subscription_id,
                         });
-                        log::info!("Rust: NativeReader.init success. Pointer: {:?}", reader.as_ref() as *const _);
                         Box::into_raw(reader) as jlong
-                    },
+                    }
                     Err(e) => {
-                        log::error!("Rust: Failed to create Pub/Sub client: {:?}", e);
-                        eprintln!("Rust: Failed to create Pub/Sub client for project {}, sub {}: {:?}", project_id, subscription_id, e);
+                        let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
+                        log::error!("{}", err_msg);
+                        eprintln!("{}", err_msg);
+                        
+                        // Throw JNI exception
+                        let _ = env.throw_new("java/lang/RuntimeException", err_msg);
                         0
                     }
                 }
@@ -549,6 +557,8 @@ pub struct RustPartitionReader {
     format: crate::arrow_convert::DataFormat,
     /// Optional Avro schema for Avro parsing.
     avro_schema: Option<apache_avro::Schema>,
+    project_id: String,
+    subscription_id: String,
 }
 
 /// Internal state for a Spark partition writer, including its dedicated Tokio runtime.

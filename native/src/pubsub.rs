@@ -412,6 +412,7 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime, ca_path: Option<Stri
 
 /// Helper to create a gRPC channel and optional Auth header.
 async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Option<MetadataValue<tonic::metadata::Ascii>>), Box<dyn std::error::Error + Send + Sync>> {
+    eprintln!("Rust: create_channel_and_header called. ca_path: {:?}", ca_path);
     let emulator_host = std::env::var("PUBSUB_EMULATOR_HOST").ok();
     let endpoint = emulator_host.as_ref().map(|h| format!("http://{}", h)).unwrap_or_else(|| "https://pubsub.googleapis.com".to_string());
     
@@ -437,14 +438,14 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
         log::debug!("Rust: Creating new gRPC channel for {}", endpoint);
         let mut endpoint_builder = Channel::from_shared(endpoint.clone())?;
         if emulator_host.is_none() {
-            let mut tls_config = ClientTlsConfig::new();
-            
-            if let Some(path) = ca_path {
-                 log::info!("Rust: Loading explicit CA roots from {}", path);
-                 let ca_data = std::fs::read(path).map_err(|e| format!("Failed to read CA file {}: {}", path, e))?;
-                 tls_config = tls_config.ca_certificate(Certificate::from_pem(ca_data));
-            }
-            // User feedback: relying on standard library (tonic/rustls-native-certs) for system defaults.
+            let tls_config = if let Some(path) = ca_path {
+                log::info!("Rust: Loading explicit CA roots from {}", path);
+                let ca_data = std::fs::read(path).map_err(|e| format!("Failed to read CA file {}: {}", path, e))?;
+                ClientTlsConfig::new().ca_certificate(Certificate::from_pem(ca_data))
+            } else {
+                log::debug!("Rust: Using system native root certificates");
+                ClientTlsConfig::new().with_native_roots()
+            };
             endpoint_builder = endpoint_builder.tls_config(tls_config)?;
         }
         let ch = endpoint_builder.connect().await?;
@@ -456,6 +457,7 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
     let header_val = if emulator_host.is_some() {
         None
     } else {
+        eprintln!("Rust: Looking for Application Default Credentials (ADC)...");
         let config = google_cloud_auth::project::Config {
             scopes: Some(&[
                 "https://www.googleapis.com/auth/cloud-platform",
@@ -464,6 +466,7 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
             ..Default::default()
         };
         let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
+        eprintln!("Rust: ADC Loaded successfully.");
         let token_source = ts.token_source();
         let token = token_source.token().await?;
         

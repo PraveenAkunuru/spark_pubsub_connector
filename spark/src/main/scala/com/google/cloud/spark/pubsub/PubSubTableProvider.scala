@@ -5,6 +5,7 @@ import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.types.{BinaryType, StringType, StructType, TimestampType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.sources.DataSourceRegister
+import scala.collection.JavaConverters._
 
 import java.util
 
@@ -50,16 +51,17 @@ class PubSubTableProvider extends TableProvider with DataSourceRegister with org
         throw new RuntimeException("Fail-Fast Auth: Failed to load Google Application Default Credentials. check GOOGLE_APPLICATION_CREDENTIALS or gcloud auth.", e)
     }
 
-    val subId = properties.get("subscriptionId")
-    if (subId == null || subId.trim.isEmpty) {
-      val topicId = properties.get("topicId")
-      if (topicId == null || topicId.trim.isEmpty) {
-         throw new IllegalArgumentException("Missing required option: Must provide either 'subscriptionId' (for read) or 'topicId' (for write).")
-      }
+    val spark = org.apache.spark.sql.SparkSession.getActiveSession.getOrElse(null)
+    val projId = PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, properties.asScala.toMap, spark).getOrElse("autodetected")
+    val subId = PubSubConfig.getOption(PubSubConfig.SUBSCRIPTION_ID_KEY, properties.asScala.toMap, spark).orNull
+    val topicId = PubSubConfig.getOption(PubSubConfig.TOPIC_ID_KEY, properties.asScala.toMap, spark).orNull
+
+    if ((subId == null || subId.trim.isEmpty) && (topicId == null || topicId.trim.isEmpty)) {
+      throw new IllegalArgumentException("Missing required option: Must provide either 'subscriptionId' (for read) or 'topicId' (for write).")
     }
     
-    val subIdEffective = properties.getOrDefault("subscriptionId", "unknown")
-    logInfo(s"Creating PubSubTable for subscription: $subIdEffective")
+    val target = if (subId != null) s"subscription $subId" else s"topic $topicId"
+    logInfo(s"Creating PubSubTable (Project: $projId) for $target")
     new PubSubTable(schema, properties)
   }
 

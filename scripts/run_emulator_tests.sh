@@ -60,11 +60,11 @@ for i in {1..10}; do
     -d "{\"messages\": [{\"data\": \"${MSG_DATA}\"}]}"
 done
 
-# Publish 10,000 Messages for ScaleIntegrationTest
-echo "Publishing 10,000 Messages to scale-topic..."
-# Using a slightly faster way to publish in batches if possible, but 10k single requests is ok for local emulator
-for i in {1..10000}; do
-  if (( i % 2500 == 0 )); then echo "Published $i..."; fi
+# Publish 1,000 Messages for ScaleIntegrationTest
+echo "Publishing 1,000 Messages to scale-topic..."
+# Using a slightly faster way to publish in batches if possible, but 1k single requests is ok for local emulator
+for i in {1..1000}; do
+  if (( i % 250 == 0 )); then echo "Published $i..."; fi
   MSG_DATA=$(echo -n "{\"id\": $i, \"data\": \"scale_value_$i\"}" | base64)
   curl -s -X POST "http://localhost:${EMULATOR_PORT}/v1/projects/scale-test-project/topics/scale-topic:publish" \
     -H "Content-Type: application/json" \

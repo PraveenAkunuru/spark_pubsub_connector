@@ -27,17 +27,25 @@ abstract class PubSubPartitionReaderBase[T](
     partition.caCertificatePath
   )
 
-  protected val nativePtr: Long = reader.init(
-    partition.projectId, 
-    partition.subscriptionId, 
-    partition.jitterMillis, 
-    schemaJson
-  )
+  System.err.println(s"DEBUG EXECUTOR: Initializing partition ${partition.partitionId} (Batch: ${partition.batchId})")
+  System.err.println(s"DEBUG EXECUTOR: JNI Init parameters -> projectId='${partition.projectId}', subscriptionId='${partition.subscriptionId}'")
 
-  if (nativePtr == 0) {
-    throw new RuntimeException("Failed to initialize native Pub/Sub client.")
+  protected val nativePtr: Long = try {
+    reader.init(
+      partition.projectId, 
+      partition.subscriptionId, 
+      partition.jitterMillis, 
+      schemaJson
+    )
+  } catch {
+    case e: Throwable =>
+      logError(s"Fatal error during NativeReader.init: ${e.getMessage}", e)
+      throw new RuntimeException(s"DEBUG_FATAL: proj='${partition.projectId}', sub='${partition.subscriptionId}', err=${e.getMessage}", e)
   }
 
+  if (nativePtr == 0) {
+    throw new RuntimeException(s"DEBUG_PTR_ZERO: proj='${partition.projectId}', sub='${partition.subscriptionId}'")
+  }
   protected val allocator = new RootAllocator()
 
   // Handle committed acks
@@ -58,10 +66,12 @@ abstract class PubSubPartitionReaderBase[T](
 
     try {
       val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
+      logDebug(s"fetchNativeBatch: batchId=${partition.batchId}, partition=${partition.partitionId}, result=$result")
       
       if (result > 0) {
         // Import takes ownership of the C structs
         val root = Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)
+        logInfo(s"Successfully fetched batch with ${root.getRowCount} rows on partition ${partition.partitionId}")
         Some(root)
       } else if (result == 0) {
         arrowArray.close()

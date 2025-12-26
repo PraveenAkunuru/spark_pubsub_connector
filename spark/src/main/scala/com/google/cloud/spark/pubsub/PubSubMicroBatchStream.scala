@@ -26,6 +26,8 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
   private val projectId = PubSubConfig.getOption(PubSubConfig.PROJECT_ID_KEY, options, spark).getOrElse("")
   private val subscriptionId = PubSubConfig.getOption(PubSubConfig.SUBSCRIPTION_ID_KEY, options, spark).getOrElse("")
 
+  logInfo(s"PubSubMicroBatchStream initialized: projectId=$projectId, subscriptionId=$subscriptionId")
+
   if (subscriptionId.isEmpty) {
     throw new IllegalArgumentException(s"Missing required option: '${PubSubConfig.SUBSCRIPTION_ID_KEY}'. Please provide a valid subscription ID.")
   }
@@ -64,16 +66,14 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
     logDebug(s"planInputPartitions called with start=$start, end=$end")
     val defaultParallelism = spark.sparkContext.defaultParallelism
+    val intelligentDefault = defaultParallelism * 2 // 2x cores for optimal Pub/Sub throughput
 
-    val maxPartitions = defaultParallelism * 2
-    val requestedPartitions = PubSubConfig.getOption(PubSubConfig.NUM_PARTITIONS_KEY, options, spark)
-      .getOrElse(defaultParallelism.toString).toInt
-    val numPartitions = if (requestedPartitions > maxPartitions) {
-      logWarning(s"Reducing numPartitions from $requestedPartitions to $maxPartitions to stay within connection quotas (max 2x cores).")
-      maxPartitions
-    } else {
-      requestedPartitions
-    }
+    val requestedPartitions = options.get(PubSubConfig.NUM_PARTITIONS_KEY)
+      .map(_.toInt)
+      .getOrElse(intelligentDefault)
+    
+    val numPartitions = requestedPartitions
+    logInfo(s"Planning $numPartitions input partitions (Default Parallelism: $defaultParallelism, Intelligent Default: $intelligentDefault)")
 
     // Decrement TTL for all pending commits and filter out expired ones
     val expiredBatches = scala.collection.mutable.ListBuffer[String]()
@@ -259,9 +259,18 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
 
 /**
  * Custom metrics for Pub/Sub.
+ * Spark 3.5 requires a 0-arg constructor for metric aggregation.
  */
-class PubSubCustomMetric(metricName: String, metricDescription: String) 
-  extends org.apache.spark.sql.connector.metric.CustomMetric {
+class PubSubCustomMetric extends org.apache.spark.sql.connector.metric.CustomMetric {
+  private var metricName: String = "unknown"
+  private var metricDescription: String = "unknown"
+
+  def this(name: String, description: String) = {
+    this()
+    this.metricName = name
+    this.metricDescription = description
+  }
+
   override def name(): String = metricName
   override def description(): String = metricDescription
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = taskMetrics.sum.toString

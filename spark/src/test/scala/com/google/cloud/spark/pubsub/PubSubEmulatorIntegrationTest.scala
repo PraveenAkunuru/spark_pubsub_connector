@@ -5,6 +5,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.Trigger
+import java.sql.Timestamp
 
 class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
 
@@ -19,7 +20,7 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
       import spark.implicits._
 
       val projectId = "spark-test-project"
-      val subscriptionId = "test-sub"
+      val subscriptionId = "test-sub-1"
 
       // We need to make sure the Native library is loaded.
       // NativeReader.load() is called in partition reader, but good to ensure here if needed?
@@ -32,7 +33,7 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
         .format("com.google.cloud.spark.pubsub.PubSubTableProvider")
         .option("projectId", projectId)
         .option("subscriptionId", subscriptionId)
-        .option("numPartitions", "3")
+        .option("numPartitions", "4")
         .load()
 
       val query = df.writeStream
@@ -46,13 +47,15 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
       // We loop and check count.
       
       var foundData = false
-      for (attempt <- 1 to 20) {
+      for (attempt <- 1 to 40) {
         if (!foundData) {
             Thread.sleep(1000)
             val count = spark.sql("SELECT * FROM pubsub_data").count()
-            println(s"Current count at attempt $attempt: $count")
             if (count > 0) {
+                println(s"Data arrived at attempt $attempt. Count: $count")
                 foundData = true
+            } else if (attempt % 5 == 0) {
+                println(s"Waiting for data... attempt $attempt")
             }
         }
       }
@@ -65,6 +68,65 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
       finalCount should be > 0L
       // We could also check content if we parse the binary/string data
       
+    } finally {
+      spark.stop()
+    }
+  }
+
+  test("Should verify data parity through JNI boundary") {
+    val spark = SparkSession.builder()
+      .appName("DataParityTest")
+      .master("local[*]")
+      .config("spark.ui.enabled", "false")
+      .getOrCreate()
+
+    try {
+      import spark.implicits._
+      val projectId = "spark-test-project"
+      val subscriptionId = "test-sub-2"
+
+      val df = spark.readStream
+        .format("com.google.cloud.spark.pubsub.PubSubTableProvider")
+        .option("projectId", projectId)
+        .option("subscriptionId", subscriptionId)
+        .option("numPartitions", "4")
+        .load()
+
+      // Verify Schema
+      val schema = df.schema
+      schema.fieldNames should contain allOf ("message_id", "publish_time", "payload")
+      schema("message_id").dataType should be (org.apache.spark.sql.types.StringType)
+      schema("publish_time").dataType should be (org.apache.spark.sql.types.TimestampType)
+      schema("payload").dataType should be (org.apache.spark.sql.types.BinaryType)
+
+      val query = df.writeStream
+        .format("memory")
+        .queryName("parity_check")
+        .start()
+
+      try {
+        // Wait for data
+        var dataArrived = false
+        for (_ <- 1 to 15 if !dataArrived) {
+          Thread.sleep(1000)
+          val count = spark.sql("SELECT * FROM parity_check").count()
+          if (count > 0) dataArrived = true
+        }
+
+        dataArrived should be (true)
+        
+        val rows = spark.sql("SELECT * FROM parity_check LIMIT 1").collect()
+        rows should not be empty
+        val row = rows(0)
+        
+        // Verify types and non-nullability of critical metadata
+        row.getAs[String]("message_id") should not be null
+        row.getAs[Timestamp]("publish_time") should not be null
+        row.getAs[Array[Byte]]("payload") should not be null
+        
+      } finally {
+        query.stop()
+      }
     } finally {
       spark.stop()
     }

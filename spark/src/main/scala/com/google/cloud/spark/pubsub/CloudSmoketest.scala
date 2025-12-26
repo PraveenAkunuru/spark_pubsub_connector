@@ -17,6 +17,7 @@ object CloudSmoketest {
 
     println(s"Starting Cloud Smoketest for subscription: $subscriptionId")
 
+
     val df = spark.readStream
       .format("pubsub-native")
       .option("subscriptionId", subscriptionId)
