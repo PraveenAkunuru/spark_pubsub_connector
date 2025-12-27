@@ -6,7 +6,7 @@ CLUSTER="cluster-be84"
 REGION="us-central1"
 BUCKET="gs://pakunuru-spark-pubsub-benchmark"
 JAR="$BUCKET/spark-pubsub-connector-3.5-assembly-0.1.0.jar"
-LIB="$BUCKET/libnative_pubsub_v5.so"
+LIB="$BUCKET/libnative_pubsub_v8.so"
 
 # TARGET: ~10GB of data for each size
 # 1KB  -> 10 * 1024 * 1024 / 1 = 10,485,760 messages

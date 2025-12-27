@@ -83,6 +83,7 @@ pub fn get_runtime() -> &'static Runtime {
     GLOBAL_RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            .worker_threads(16)
             .thread_name("pubsub-native-worker")
             .build()
             .expect("Failed to create global Tokio runtime")
@@ -195,8 +196,8 @@ impl PubSubClient {
                     subscription: sub_name,
                     stream_ack_deadline_seconds: 60,
                     client_id: "rust-spark-connector".to_string(),
-                    max_outstanding_messages: 20000,
-                    max_outstanding_bytes: 200 * 1024 * 1024, // 200MB headroom
+                    max_outstanding_messages: 50000,
+                    max_outstanding_bytes: 500 * 1024 * 1024, // 500MB headroom
                     ..Default::default()
                 };
 
@@ -219,7 +220,7 @@ impl PubSubClient {
                         let mut pending_messages: std::collections::VecDeque<ReceivedMessage> = std::collections::VecDeque::new();
 
                         loop {
-                            let tx_full = pending_messages.len() >= 40000;
+                            let tx_full = pending_messages.len() >= 100000;
 
                             tokio::select! {
                                 ext_opt = ext_rx.recv() => {
@@ -260,11 +261,20 @@ impl PubSubClient {
                                     match res {
                                         Ok(permit) => {
                                             if let Some(msg) = pending_messages.pop_front() {
-                                                // INSTRUMENTATION
                                                 let size = msg.message.as_ref().map(|m| m.data.len()).unwrap_or(0);
-                                                BUFFERED_BYTES.fetch_sub(size, Ordering::Relaxed);
-                                                
+                                                crate::pubsub::BUFFERED_BYTES.fetch_sub(size, std::sync::atomic::Ordering::Relaxed);
                                                 permit.send(msg);
+                                                
+                                                // Aggressively drain remaining while space allows
+                                                while let Some(next_msg) = pending_messages.front() {
+                                                    let n_size = next_msg.message.as_ref().map(|m| m.data.len()).unwrap_or(0);
+                                                    match tx.try_send(pending_messages.pop_front().unwrap()) {
+                                                        Ok(_) => {
+                                                            crate::pubsub::BUFFERED_BYTES.fetch_sub(n_size, std::sync::atomic::Ordering::Relaxed);
+                                                        }
+                                                        Err(_) => break, // tx is full
+                                                    }
+                                                }
                                             }
                                         }
                                         Err(_) => return,
@@ -307,48 +317,55 @@ impl PubSubClient {
     /// Waits up to `wait_ms` for the first message, then drains available messages 
     /// up to `max_messages`.
     pub async fn fetch_batch(&mut self, max_messages: usize, wait_ms: u64) -> Result<Vec<ReceivedMessage>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut messages = Vec::new();
-        
+        let mut messages = Vec::with_capacity(max_messages);
         let deadline = Instant::now() + Duration::from_millis(wait_ms);
         
-        // Block for at least one message or timeout or until deadline
-        match tokio::time::timeout_at(deadline, self.receiver.recv()).await {
-            Ok(Some(msg)) => messages.push(msg),
-            Ok(None) => return Err("Channel closed".into()),
-            Err(_) => return Ok(Vec::new()), // Timeout on first message
-        }
-        
-        // Drain additional available messages without blocking, up to max_messages
-        while messages.len() < max_messages {
-            match self.receiver.try_recv() {
-                Ok(msg) => messages.push(msg),
-                Err(_) => break,
+        while messages.len() < max_messages && Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { break; }
+
+            match tokio::time::timeout(remaining, self.receiver.recv()).await {
+                Ok(Some(msg)) => {
+                    messages.push(msg);
+                    
+                    // After one message arrives, try to drain all currently available without waiting
+                    while messages.len() < max_messages {
+                        match self.receiver.try_recv() {
+                            Ok(m) => messages.push(m),
+                            Err(_) => break,
+                        }
+                    }
+                }
+                Ok(None) => break, // Channel closed
+                Err(_) => break,   // Timeout
             }
         }
         
-        // INSTRUMENTATION: Deduct from global buffer size safely
-        // Note: fetch_batch is single-threaded per reader, but BUFFERED_BYTES is global.
-        // We already decremented when moving from pending_messages to rx in the background task?
-        // Wait, the background task decrements when it sends to `self.receiver`.
-        // So `fetch_batch` doesn't need to decrement BUFFERED_BYTES.
-        // The message is "buffered" when it is in `pending_messages` OR `self.receiver`.
-        // The background task increments when received from gRPC.
-        // It should decrement when *Spark consumes it*?
-        // No, `BUFFERED_BYTES` tracks native memory usage.
-        // If it's in `self.receiver` (channel), it's still in native memory.
-        // If passed to Spark, it moves to JVM (or copied to Arrow buffer).
-        // The `fetch_batch` moves it out of `self.receiver`.
-        // The background task decremented it when popping from `pending_messages` and sending to `rx`?
-        // Let's check the background task logic in `new`.
-        // Line 188: `BUFFERED_BYTES.fetch_sub(size, Ordering::Relaxed);` when sending to `permit` (rx).
-        // So `BUFFERED_BYTES` only counts what is in `pending_messages` deque?
-        // Yes, that seems to be the logic implemented.
-        // Messages in the channel (rx) are technically buffered too, but the channel has a limit (1000).
-        // So the unbounded growth risk is `pending_messages`.
-        // So this is fine.
-
+        INGESTED_MESSAGES.fetch_add(messages.len() as u64, Ordering::Relaxed);
+        // Estimate bytes for 1KB if we don't have exact size yet
+        INGESTED_BYTES.fetch_add((messages.len() * 1024) as u64, Ordering::Relaxed);
+        
         Ok(messages)
     }
+    // Note: fetch_batch is single-threaded per reader, but BUFFERED_BYTES is global.
+    // We already decremented when moving from pending_messages to rx in the background task?
+    // Wait, the background task decrements when it sends to `self.receiver`.
+    // So `fetch_batch` doesn't need to decrement BUFFERED_BYTES.
+    // The message is "buffered" when it is in `pending_messages` OR `self.receiver`.
+    // The background task increments when received from gRPC.
+    // It should decrement when *Spark consumes it*?
+    // No, `BUFFERED_BYTES` tracks native memory usage.
+    // If it's in `self.receiver` (channel), it's still in native memory.
+    // If passed to Spark, it moves to JVM (or copied to Arrow buffer).
+    // The `fetch_batch` moves it out of `self.receiver`.
+    // The background task decremented it when popping from `pending_messages` and sending to `rx`?
+    // Let's check the background task logic in `new`.
+    // Line 188: `BUFFERED_BYTES.fetch_sub(size, Ordering::Relaxed);` when sending to `permit` (rx).
+    // So `BUFFERED_BYTES` only counts what is in `pending_messages` deque?
+    // Yes, that seems to be the logic implemented.
+    // Messages in the channel (rx) are technically buffered too, but the channel has a limit (1000).
+    // So the unbounded growth risk is `pending_messages`.
+    // So this is fine.
 
     /// Sends acknowledgments for the given message IDs.
     pub async fn acknowledge(&self, ack_ids: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
