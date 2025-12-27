@@ -36,3 +36,6 @@ checkpoint/
 PRD.md
 native/target_docker/
 native/target_fix/
+native/target_static/
+suite_pid.txt
+spark/driveroutput.*
