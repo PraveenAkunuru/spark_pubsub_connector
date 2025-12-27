@@ -6,7 +6,7 @@ CLUSTER="cluster-be84"
 REGION="us-central1"
 BUCKET="gs://pakunuru-spark-pubsub-benchmark"
 JAR="$BUCKET/spark-pubsub-connector-3.5-assembly-0.1.0.jar"
-LIB="$BUCKET/libnative_pubsub_v3.so"
+LIB="$BUCKET/libnative_pubsub_v5.so"
 
 # TARGET: ~10GB of data for each size
 # 1KB  -> 10 * 1024 * 1024 / 1 = 10,485,760 messages
@@ -26,7 +26,12 @@ for i in "${!SIZES[@]}"; do
     COUNT=${COUNTS[$i]}
     TOPIC="benchmark-throughput-$LABEL"
     SUB="benchmark-sub-$LABEL"
-    OUT="$BUCKET/output/final_run_$LABEL"
+    RUN_ID=$(date +%Y%m%d_%H%M)
+    OUT="$BUCKET/output/run_${LABEL}_${RUN_ID}"
+    
+    # 0. Clean Output
+    echo "Cleaning output $OUT..."
+    gsutil rm -rf "$OUT" || true
     
     # Calculate safe read batch size (Target ~8MB to stay 20% below 10MB limit)
     READ_BATCH=1000
