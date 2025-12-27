@@ -113,11 +113,11 @@ mod jni {
         
         /// Initializes a new `PubSubClient` with the given project and subscription.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
-        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String) -> jlong {
+        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String, partition_id: i32) -> jlong {
             crate::safe_jni_call(0, || {
-                // Initialize JNI logging (safe to call multiple times)
+                // Pre-initialize JNI logging to allow early log correlation
                 crate::logging::init(env);
-                log::info!("Rust: NativeReader.init called for project: {}", project_id);
+                crate::logging::set_context(&format!("[Partition: {}]", partition_id));
                 log::info!("Rust: NativeReader.init called for project: {}, sub: {}", project_id, subscription_id);
 
                 if jitter_millis > 0 {
@@ -162,47 +162,54 @@ mod jni {
                 };
 
                 let rt = crate::pubsub::get_runtime();
-                
-                let client_res = rt.block_on(async {
-                    log::debug!("Rust: Calling PubSubClient::new...");
-                    PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
+                let sub_key = (subscription_id.clone(), partition_id);
+
+                // Try to reuse existing client from registry
+                let client = if let Some((_, c)) = crate::pubsub::CLIENT_REGISTRY.remove(&sub_key) {
+                    log::info!("Rust: Reusing existing PubSubClient for partition {}", partition_id);
+                    c
+                } else {
+                    log::info!("Rust: Creating new PubSubClient for partition {}", partition_id);
+                    let client_res = rt.block_on(async {
+                        PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
+                    });
+
+                    match client_res {
+                        Ok(c) => {
+                            crate::pubsub::start_deadline_manager(rt, config.ca_certificate_path.clone());
+                            c
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
+                            log::error!("{}", err_msg);
+                            let _ = env.throw_new("java/lang/RuntimeException", err_msg);
+                            return 0;
+                        }
+                    }
+                };
+
+                let reader = Box::new(crate::RustPartitionReader {
+                    rt,
+                    client,
+                    schema: config.arrow_schema,
+                    format: config.format,
+                    avro_schema: config.avro_schema,
+                    partition_id,
                 });
-
-                match client_res {
-                    Ok(client) => {
-                        log::info!("Rust: PubSubClient::new SUCCESS");
-                        crate::pubsub::start_deadline_manager(rt, config.ca_certificate_path.clone());
-
-                        let reader = Box::new(crate::RustPartitionReader {
-                            rt,
-                            client,
-                            schema: config.arrow_schema,
-                            format: config.format,
-                            avro_schema: config.avro_schema,
-                        });
-                        Box::into_raw(reader) as jlong
-                    }
-                    Err(e) => {
-                        let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
-                        log::error!("{}", err_msg);
-                        
-                        // Throw JNI exception
-                        let _ = env.throw_new("java/lang/RuntimeException", err_msg);
-                        0
-                    }
-                }
+                Box::into_raw(reader) as jlong
             })
         }
 
         /// Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.
         /// Returns 1 if messages were fetched, 0 if empty, or negative on error.
-        pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, arrow_array_addr: jlong, arrow_schema_addr: jlong) -> i32 {
+        pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, arrow_array_addr: jlong, arrow_schema_addr: jlong, max_messages: i32, wait_ms: jlong) -> i32 {
             crate::safe_jni_call(-100, || {
                 if reader_ptr == 0 { return -1; }
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
+                crate::logging::set_context(&format!("[P: {}, B: {}]", reader.partition_id, batch_id));
 
                 // Blocking fetch from native buffer (with short timeout)
-                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(100).await }) {
+                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
                     Ok(msgs) => msgs,
                     Err(e) => {
                         log::error!("Rust: fetch_batch failed: {:?}", e);
@@ -311,18 +318,52 @@ mod jni {
         }
 
         /// Returns the estimated size (bytes) of messages buffered in the native layer (off-heap).
-        pub extern "jni" fn getNativeMemoryUsage(self, _env: &JNIEnv) -> jlong {
+        pub extern "jni" fn getNativeMemoryUsageNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || {
-                crate::pubsub::get_buffered_bytes() as jlong
+                crate::pubsub::get_buffered_bytes() as i64
             })
         }
 
-        /// Destroys the `RustPartitionReader` and shuts down its Tokio runtime.
+        pub extern "jni" fn getIngestedBytesNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_ingested_bytes() as i64
+            })
+        }
+
+        pub extern "jni" fn getIngestedMessagesNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_ingested_messages() as i64
+            })
+        }
+
+        pub extern "jni" fn getReadErrorsNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_read_errors() as i64
+            })
+        }
+
+        pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_retry_count() as i64
+            })
+        }
+
+        pub extern "jni" fn getAckLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_ack_latency_micros() as i64
+            })
+        }
+
+        /// Closes the reader, but returns the PubSubClient to the registry for reuse.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
-                    let _reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
-                    // Runtime will be dropped here, shutting down connections
+                    let reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
+                    let sub_key = (reader.client.subscription_name.clone(), reader.partition_id);
+                    
+                    log::debug!("Rust: Returning PubSubClient for partition {} to registry", reader.partition_id);
+                    crate::pubsub::CLIENT_REGISTRY.insert(sub_key, reader.client);
+                    // reader (the metadata wrapper) is dropped here, but client is saved in registry
                 }
             })
         }
@@ -340,12 +381,11 @@ mod jni {
     impl<'env: 'borrow, 'borrow> NativeWriter<'env, 'borrow> {
         /// Initializes a new `PublisherClient` with the given project and topic.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionWriter`.
-        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String, ca_certificate_path: String) -> jlong {
+        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String, ca_certificate_path: String, partition_id: i32) -> jlong {
             crate::safe_jni_call(0, || {
-                // Guideline 4: Staggered Initialization
-                // Initialize logging (safe to call multiple times)
                 crate::logging::init(_env);
-                log::info!("Rust: NativeWriter.init called for project: {}", project_id);
+                crate::logging::set_context(&format!("[Sink P: {}]", partition_id));
+                log::info!("Rust: NativeWriter.init called for project: {}, topic: {}", project_id, topic_id);
 
                 let mut rng = rand::thread_rng();
                 let delay_ms = rand::Rng::gen_range(&mut rng, 0..500);
@@ -368,6 +408,7 @@ mod jni {
                         let writer = Box::new(crate::RustPartitionWriter {
                             rt,
                             client: c,
+                            partition_id,
                         });
                         Box::into_raw(writer) as jlong
                     },
@@ -388,6 +429,7 @@ mod jni {
                 }
                 // SAFETY: Java side provides valid pointers to FFI structures
                 let writer = unsafe { &mut *(writer_ptr as *mut crate::RustPartitionWriter) };
+                crate::logging::set_context(&format!("[Sink P: {}]", writer.partition_id));
                 
                 // SAFETY: We own the memory addresses passed from Java via the C Data Interface.
                 // We use std::ptr::read to take ownership of the FFI structs.
@@ -509,6 +551,36 @@ mod jni {
 
 
 
+        pub extern "jni" fn getPublishedBytesNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_published_bytes() as i64
+            })
+        }
+
+        pub extern "jni" fn getPublishedMessagesNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_published_messages() as i64
+            })
+        }
+
+        pub extern "jni" fn getWriteErrorsNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_write_errors() as i64
+            })
+        }
+
+        pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_retry_count() as i64
+            })
+        }
+
+        pub extern "jni" fn getPublishLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
+            crate::safe_jni_call(0, || {
+                crate::pubsub::get_publish_latency_micros() as i64
+            })
+        }
+
         pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong, timeout_ms: jlong) -> i32 {
             crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
@@ -544,24 +616,16 @@ mod jni {
 /// This struct holds the resources needed to pull messages from Pub/Sub and convert them
 /// to Arrow batches. It is maintained in Rust memory and referenced by Spark via a raw pointer.
 pub struct RustPartitionReader {
-    /// Reference to global Tokio runtime.
     rt: &'static Runtime,
-    /// Pub/Sub client instance.
     client: PubSubClient,
-    /// Optional Arrow schema for structured parsing.
     schema: Option<arrow::datatypes::SchemaRef>,
-    /// Format of the data in Pub/Sub (JSON or Avro).
     format: crate::arrow_convert::DataFormat,
-    /// Optional Avro schema for Avro parsing.
     avro_schema: Option<apache_avro::Schema>,
+    partition_id: i32,
 }
 
-/// Internal state for a Spark partition writer, including its dedicated Tokio runtime.
-/// 
-/// This struct holds the resources needed to publish messages to Pub/Sub.
 pub struct RustPartitionWriter {
-    /// Reference to global Tokio runtime.
     rt: &'static Runtime,
-    /// Pub/Sub publisher client instance.
     client: crate::pubsub::PublisherClient,
+    partition_id: i32,
 }

@@ -17,13 +17,13 @@ class NativeReader {
    * Initializes the native Pub/Sub client for a specific subscription.
    * Returns a raw pointer (Long) to the Rust state.
    */
-  @native def init(projectId: String, subscriptionId: String, jitterMillis: Int, schemaJson: String): Long
+  @native def init(projectId: String, subscriptionId: String, jitterMillis: Int, schemaJson: String, partitionId: Int): Long
 
   /**
    * Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.
    * Returns 1 if messages were fetched, 0 if empty, or negative on error.
    */
-  @native def getNextBatch(readerPtr: Long, batchId: String, arrowArrayAddr: Long, arrowSchemaAddr: Long): Int
+  @native def getNextBatch(readerPtr: Long, batchId: String, arrowArrayAddr: Long, arrowSchemaAddr: Long, maxMessages: Int, waitMs: Long): Int
 
   /**
    * Sends an asynchronous Acknowledgment request for the given list of message IDs.
@@ -42,9 +42,34 @@ class NativeReader {
   @native def getUnackedCount(readerPtr: Long): Int
 
   /**
-   * Returns the estimated size (bytes) of messages buffered in the native layer.
+   * Returns the estimated size (bytes) of messages buffered in the native layer (off-heap).
    */
-  @native def getNativeMemoryUsage(): Long
+  @native def getNativeMemoryUsageNative(): Long
+
+  /**
+   * Returns the cumulative count of bytes ingested from Pub/Sub.
+   */
+  @native def getIngestedBytesNative(): Long
+
+  /**
+   * Returns the cumulative count of messages ingested from Pub/Sub.
+   */
+  @native def getIngestedMessagesNative(): Long
+
+  /**
+   * Returns the cumulative count of gRPC read/ack errors.
+   */
+  @native def getReadErrorsNative(): Long
+
+  /**
+   * Returns the cumulative count of retry attempts.
+   */
+  @native def getRetryCountNative(): Long
+
+  /**
+   * Returns the cumulative time (microseconds) spent in native ACK/deadline calls.
+   */
+  @native def getAckLatencyMicrosNative(): Long
 
   /**
    * Shuts down the native client and releases associated resources (runtime, connections).

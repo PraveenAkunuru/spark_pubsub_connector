@@ -64,7 +64,13 @@ class PubSubScan(schema: StructType, options: CaseInsensitiveStringMap) extends 
 
   override def supportedCustomMetrics(): Array[org.apache.spark.sql.connector.metric.CustomMetric] = {
     Array(
-      new PubSubCustomMetric("pubsub_backlog_count", "Number of messages held in the native reservoir (unacknowledged)")
+      new NativeMemoryMetric(),
+      new NativeUnackedCountMetric(),
+      new IngestedBytesMetric(),
+      new IngestedMessagesMetric(),
+      new ReadErrorsMetric(),
+      new RetryCountMetric(),
+      new AckLatencyMetric()
     )
   }
 }

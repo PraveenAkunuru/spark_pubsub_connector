@@ -45,14 +45,14 @@ object ExecutorDiag {
       }
 
       val initResult = try {
-        val ptr = reader.init(projectId, subId, 0, schemaJson)
+        val ptr = reader.init(projectId, subId, 0, schemaJson, id)
         if (ptr != 0 && ptr != -1) {
           val allocator = new RootAllocator()
           val arrowArray = ArrowArray.allocateNew(allocator)
           val arrowSchema = ArrowSchema.allocateNew(allocator)
           try {
             Thread.sleep(5000)
-            val batchRes = reader.getNextBatch(ptr, "batch-diag", arrowArray.memoryAddress(), arrowSchema.memoryAddress())
+            val batchRes = reader.getNextBatch(ptr, "batch-diag", arrowArray.memoryAddress(), arrowSchema.memoryAddress(), 10, 1000L)
             
             if (batchRes > 0) {
                val root = Data.importVectorSchemaRoot(allocator, arrowArray, arrowSchema, null)

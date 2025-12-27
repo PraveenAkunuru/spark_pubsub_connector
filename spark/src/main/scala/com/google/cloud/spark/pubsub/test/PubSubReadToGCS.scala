@@ -46,7 +46,7 @@ object PubSubReadToGCS {
     while (query.isActive) {
       val progress = query.lastProgress
       if (progress != null) {
-        val nativeMem = new com.google.cloud.spark.pubsub.NativeReader().getNativeMemoryUsage()
+        val nativeMem = new com.google.cloud.spark.pubsub.NativeReader().getNativeMemoryUsageNative()
         println(s"Batch: ${progress.batchId} | Rate: ${progress.processedRowsPerSecond} rows/s | Native Mem: ${nativeMem} bytes")
       }
       Thread.sleep(5000)

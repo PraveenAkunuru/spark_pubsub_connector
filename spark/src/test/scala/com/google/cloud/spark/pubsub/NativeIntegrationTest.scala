@@ -19,7 +19,7 @@ class NativeIntegrationTest extends AnyFunSuite {
       // Ensure library is loaded
       NativeReader.load()
       
-      val ptr = reader.init("test-project", "test-subscription", 0, "")
+      val ptr = reader.init("test-project", "test-subscription", 0, "", 0)
       // If we got here, JNI worked? Or maybe connection worked?
       // If we don't have creds, it will panic or error.
       // But we just want to verify JNI linkage for "Phase 2 foundation".

@@ -14,7 +14,9 @@ tonic = { version = "0.12", features = ["tls", "tls-native-roots", "tls-webpki-r
 prost = "0.13"
 prost-types = "0.13"
 jni = "0.19"
+dashmap = "5.5"
 robusta_jni = "0.2"
+openssl = "0.10"
 futures = "0.3"
 google-cloud-googleapis = { version = "0.15", features = ["pubsub"] }
 google-cloud-auth = "0.16"

@@ -13,7 +13,20 @@ use std::thread;
 use std::sync::mpsc::SyncSender;
 
 // 
+use std::cell::RefCell;
+
 static SENDER: OnceLock<SyncSender<(Level, String)>> = OnceLock::new();
+
+thread_local! {
+    static LOG_CONTEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Sets the current thread's logging context (e.g., "[Partition: 0, Batch: 1]").
+pub fn set_context(context: &str) {
+    LOG_CONTEXT.with(|c| {
+        *c.borrow_mut() = context.to_string();
+    });
+}
 
 /// Logger implementation that sends records to a background JNI thread.
 struct JniLogger;
@@ -26,8 +39,14 @@ impl Log for JniLogger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             if let Some(tx) = SENDER.get() {
+                let context = LOG_CONTEXT.with(|c| c.borrow().clone());
+                let msg = if context.is_empty() {
+                    record.args().to_string()
+                } else {
+                    format!("{} {}", context, record.args())
+                };
                 // Use try_send to avoid blocking if the channel is full
-                let _ = tx.try_send((record.level(), record.args().to_string()));
+                let _ = tx.try_send((record.level(), msg));
             }
         }
     }

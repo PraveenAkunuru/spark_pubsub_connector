@@ -11,7 +11,7 @@ class NegativeReaderTest extends AnyFunSuite {
     NativeReader.load()
     val reader = new NativeReader()
     // Invalid project/subscription
-    val ptr = reader.init("", "", 0, "")
+    val ptr = reader.init("", "", 0, "", 0)
     // Should return 0 (NULL pointer)
     assert(ptr == 0, "Reader init should return 0 for invalid config")
     

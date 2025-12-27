@@ -28,11 +28,18 @@ use tokio::runtime::Runtime;
 
 static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-/// Global connection pool to reuse gRPC channels across readers/writers.
-/// Key: Endpoint URL (e.g. "https://pubsub.googleapis.com")
 static CONNECTION_POOL: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<String, Channel>>> = once_cell::sync::Lazy::new(|| {
     std::sync::Mutex::new(std::collections::HashMap::new())
 });
+
+/// Global registry for persistent PubSubClient instances.
+/// Key is (subscription_name, partition_id), value is the persistent client.
+pub static CLIENT_REGISTRY: once_cell::sync::Lazy<dashmap::DashMap<(String, i32), PubSubClient>> = once_cell::sync::Lazy::new(|| {
+    dashmap::DashMap::new()
+});
+
+/// Global cache for the token source to avoid redundant metadata server hits during parallel initialization.
+static GLOBAL_TOKEN_SOURCE: OnceLock<google_cloud_auth::token::DefaultTokenSourceProvider> = OnceLock::new();
 
 type AckReservoir = std::sync::Mutex<
     std::collections::HashMap<
@@ -53,6 +60,23 @@ pub fn ack_reservoir_instant_now() -> Instant {
 /// This provides visibility into off-heap memory usage.
 static BUFFERED_BYTES: AtomicUsize = AtomicUsize::new(0);
 
+// Cumulative throughput metrics (Ingest / Reading)
+static INGESTED_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static INGESTED_MESSAGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Cumulative throughput metrics (Publish / Writing)
+static PUBLISHED_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PUBLISHED_MESSAGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Health & Error Metrics
+static READ_ERRORS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static WRITE_ERRORS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static RETRY_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Latency Metrics (Cumulative micros)
+static PUBLISH_LATENCY_TOTAL_MICROS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ACK_LATENCY_TOTAL_MICROS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Returns a reference to the global Tokio runtime.
 /// It is lazily initialized on the first call.
 pub fn get_runtime() -> &'static Runtime {
@@ -68,6 +92,42 @@ pub fn get_runtime() -> &'static Runtime {
 /// Returns the current estimated size of buffered messages in bytes.
 pub fn get_buffered_bytes() -> i64 {
     BUFFERED_BYTES.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_ingested_bytes() -> i64 {
+    INGESTED_BYTES.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_ingested_messages() -> i64 {
+    INGESTED_MESSAGES.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_published_bytes() -> i64 {
+    PUBLISHED_BYTES.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_published_messages() -> i64 {
+    PUBLISHED_MESSAGES.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_read_errors() -> i64 {
+    READ_ERRORS.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_write_errors() -> i64 {
+    WRITE_ERRORS.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_retry_count() -> i64 {
+    RETRY_COUNT.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_publish_latency_micros() -> i64 {
+    PUBLISH_LATENCY_TOTAL_MICROS.load(Ordering::Relaxed) as i64
+}
+
+pub fn get_ack_latency_micros() -> i64 {
+    ACK_LATENCY_TOTAL_MICROS.load(Ordering::Relaxed) as i64
 }
 
 /// A low-latency subscriber client that manages a background `StreamingPull` task.
@@ -116,7 +176,7 @@ impl PubSubClient {
         }
 
         // 3. Start StreamingPull
-        let (tx, rx) = mpsc::channel(1000);
+        let (tx, rx) = mpsc::channel(20000); // Increased for high pre-fetch
         
         let (ext_tx, mut ext_rx) = tokio::sync::mpsc::channel::<StreamingPullRequest>(100);
         let sub_name_for_task = full_sub_name.clone();
@@ -135,8 +195,8 @@ impl PubSubClient {
                     subscription: sub_name,
                     stream_ack_deadline_seconds: 60,
                     client_id: "rust-spark-connector".to_string(),
-                    max_outstanding_messages: 1000,
-                    max_outstanding_bytes: 10 * 1024 * 1024,
+                    max_outstanding_messages: 20000,
+                    max_outstanding_bytes: 200 * 1024 * 1024, // 200MB headroom
                     ..Default::default()
                 };
 
@@ -159,7 +219,7 @@ impl PubSubClient {
                         let mut pending_messages: std::collections::VecDeque<ReceivedMessage> = std::collections::VecDeque::new();
 
                         loop {
-                            let tx_full = pending_messages.len() >= 2000;
+                            let tx_full = pending_messages.len() >= 40000;
 
                             tokio::select! {
                                 ext_opt = ext_rx.recv() => {
@@ -182,6 +242,8 @@ impl PubSubClient {
                                                 // INSTRUMENTATION
                                                 let size = msg.message.as_ref().map(|m| m.data.len()).unwrap_or(0);
                                                 BUFFERED_BYTES.fetch_add(size, Ordering::Relaxed);
+                                                INGESTED_BYTES.fetch_add(size as u64, Ordering::Relaxed);
+                                                INGESTED_MESSAGES.fetch_add(1, Ordering::Relaxed);
                                                 
                                                 pending_messages.push_back(msg);
                                             }
@@ -189,6 +251,7 @@ impl PubSubClient {
                                         Ok(None) => break, 
                                         Err(e) => {
                                             log::error!("Rust: gRPC Stream error: {:?}", e);
+                                            READ_ERRORS.fetch_add(1, Ordering::Relaxed);
                                             break;
                                         }
                                     }
@@ -225,6 +288,7 @@ impl PubSubClient {
                         let sleep_ms = (backoff_millis as f64 * jitter) as u64;
 
                         log::warn!("Rust: StreamingPull failed: {:?}. Retrying in {}ms", e, sleep_ms);
+                        READ_ERRORS.fetch_add(1, Ordering::Relaxed);
                         tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)).await;
                         backoff_secs = std::cmp::min(backoff_secs * 2, 60);
                     }
@@ -240,21 +304,22 @@ impl PubSubClient {
     }
     
     /// Fetches a batch of messages from the internal buffer.
-    /// Waits up to `wait_ms` for the first message, then drains available messages.
-    pub async fn fetch_batch(&mut self, wait_ms: u64) -> Result<Vec<ReceivedMessage>, Box<dyn std::error::Error + Send + Sync>> {
+    /// Waits up to `wait_ms` for the first message, then drains available messages 
+    /// up to `max_messages`.
+    pub async fn fetch_batch(&mut self, max_messages: usize, wait_ms: u64) -> Result<Vec<ReceivedMessage>, Box<dyn std::error::Error + Send + Sync>> {
         let mut messages = Vec::new();
         
         let deadline = Instant::now() + Duration::from_millis(wait_ms);
         
-        // Block for at least one message or timeout
+        // Block for at least one message or timeout or until deadline
         match tokio::time::timeout_at(deadline, self.receiver.recv()).await {
             Ok(Some(msg)) => messages.push(msg),
-             Ok(None) => return Err("Channel closed".into()),
-            Err(_) => return Ok(Vec::new()), // Timeout
+            Ok(None) => return Err("Channel closed".into()),
+            Err(_) => return Ok(Vec::new()), // Timeout on first message
         }
         
-        // Drain additional available messages without blocking
-        while messages.len() < 1000 {
+        // Drain additional available messages without blocking, up to max_messages
+        while messages.len() < max_messages {
             match self.receiver.try_recv() {
                 Ok(msg) => messages.push(msg),
                 Err(_) => break,
@@ -372,8 +437,13 @@ pub fn start_deadline_manager(rt: &tokio::runtime::Runtime, ca_path: Option<Stri
                         request.metadata_mut().insert("authorization", val.clone());
                     }
                     
+                    let start = std::time::Instant::now();
                     if let Err(e) = client.modify_ack_deadline(request).await {
                         log::warn!("Rust DeadlineMgr: Failed to extend deadlines: {:?}", e);
+                        READ_ERRORS.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        let duration = start.elapsed().as_micros() as u64;
+                        ACK_LATENCY_TOTAL_MICROS.fetch_add(duration, Ordering::Relaxed);
                     }
                 }
             }
@@ -436,10 +506,46 @@ async fn create_channel_and_header(ca_path: Option<&str>) -> Result<(Channel, Op
             ]),
             ..Default::default()
         };
-        let ts = google_cloud_auth::token::DefaultTokenSourceProvider::new(config).await?;
+        
+        // Try to get from global cache first
+        let ts = if let Some(ts) = GLOBAL_TOKEN_SOURCE.get() {
+            ts
+        } else {
+            let mut retry_count = 0;
+            let max_retries = 3;
+            let mut last_error = None;
+            
+            let mut ts_final = None;
+            while retry_count <= max_retries {
+                match google_cloud_auth::token::DefaultTokenSourceProvider::new(config.clone()).await {
+                    Ok(ts) => {
+                        ts_final = Some(ts);
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("Rust: Failed to create TokenSource (attempt {}): {:?}", retry_count + 1, e);
+                        last_error = Some(e.into());
+                    }
+                }
+                retry_count += 1;
+                if retry_count <= max_retries {
+                    let delay = Duration::from_millis(500 * (1 << retry_count));
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            
+            if let Some(ts) = ts_final {
+                // Try to initialize GLOBAL_TOKEN_SOURCE, if someone else beat us to it, that's fine.
+                let _ = GLOBAL_TOKEN_SOURCE.set(ts);
+                GLOBAL_TOKEN_SOURCE.get().unwrap()
+            } else {
+                return Err(last_error.unwrap_or_else(|| "Unknown ADC error".into()));
+            }
+        };
+
         log::info!("Rust: ADC Loaded successfully.");
         let token_source = ts.token_source();
-        let token = token_source.token().await?;
+        let token = token_source.token().await.map_err(|e| format!("Token error: {}", e))?;
         
         let header_string = if token.starts_with("Bearer ") {
             token
@@ -485,6 +591,11 @@ impl PublisherClient {
                          if messages.is_empty() { continue; }
                         
                         log::debug!("Rust: Publishing batch of {} messages to {}", messages.len(), topic);
+                        
+                        // INSTRUMENTATION - PRE-CALCULATE BEFORE MOVE
+                        let batch_bytes: u64 = messages.iter().map(|m| m.data.len() as u64).sum();
+                        let batch_count = messages.len() as u64;
+
                         let req = google_cloud_googleapis::pubsub::v1::PublishRequest {
                             topic: topic.clone(),
                             messages,
@@ -499,12 +610,19 @@ impl PublisherClient {
                                 request.metadata_mut().insert("authorization", val.clone());
                             }
                             
+                            let start = std::time::Instant::now();
                             match client.publish(request).await {
                                 Ok(_) => {
+                                    let duration = start.elapsed().as_micros() as u64;
+                                    PUBLISH_LATENCY_TOTAL_MICROS.fetch_add(duration, Ordering::Relaxed);
                                     log::debug!("Rust: Publish batch successful");
+                                    PUBLISHED_BYTES.fetch_add(batch_bytes, Ordering::Relaxed);
+                                    PUBLISHED_MESSAGES.fetch_add(batch_count, Ordering::Relaxed);
                                     break;
                                 }, 
                                 Err(e) => {
+                                    WRITE_ERRORS.fetch_add(1, Ordering::Relaxed);
+                                    RETRY_COUNT.fetch_add(1, Ordering::Relaxed);
                                     // ... Error handling ...
                                     let code = e.code();
                                     if code == tonic::Code::NotFound || code == tonic::Code::PermissionDenied || code == tonic::Code::InvalidArgument {

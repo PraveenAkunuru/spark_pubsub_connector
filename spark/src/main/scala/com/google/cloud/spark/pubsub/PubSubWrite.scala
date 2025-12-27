@@ -38,6 +38,16 @@ class PubSubWriteBuilder(schema: StructType, options: CaseInsensitiveStringMap) 
  */
 class PubSubWrite(schema: StructType, options: Map[String, String]) extends Write {
   override def toBatch: BatchWrite = new PubSubBatchWrite(schema, options)
+
+  override def supportedCustomMetrics(): Array[org.apache.spark.sql.connector.metric.CustomMetric] = {
+    Array(
+      new PublishedBytesMetric(),
+      new PublishedMessagesMetric(),
+      new WriteErrorsMetric(),
+      new RetryCountMetric(),
+      new PublishLatencyMetric()
+    )
+  }
 }
 
 /**
@@ -92,7 +102,7 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private val writer = new NativeWriter()
   logInfo(s"PubSubDataWriter created for $projectId/$topicId, partitionId: $partitionId, taskId: $taskId")
   
-  private val nativePtr = writer.init(projectId, topicId, caCertificatePath.getOrElse(""))
+  private val nativePtr = writer.init(projectId, topicId, caCertificatePath.getOrElse(""), partitionId)
   if (nativePtr == 0) {
     throw new RuntimeException("Failed to initialize native Pub/Sub writer.")
   }
@@ -176,6 +186,16 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   override def commit(): WriterCommitMessage = {
     flush()
     new PubSubWriterCommitMessage(partitionId, taskId)
+  }
+
+  override def currentMetricsValues(): Array[org.apache.spark.sql.connector.metric.CustomTaskMetric] = {
+    Array(
+      PubSubTaskMetric("published_bytes", writer.getPublishedBytesNative()),
+      PubSubTaskMetric("published_messages", writer.getPublishedMessagesNative()),
+      PubSubTaskMetric("native_write_errors", writer.getWriteErrorsNative()),
+      PubSubTaskMetric("native_retry_count", writer.getRetryCountNative()),
+      PubSubTaskMetric("native_publish_latency_micros", writer.getPublishLatencyMicrosNative())
+    )
   }
 
   override def abort(): Unit = {

@@ -22,16 +22,23 @@ object PubSubLoadGenerator {
       .appName("PubSubLoadGenerator")
       .getOrCreate()
 
-    println(s"Starting Load Generator: Topic=$topicId, Count=$msgCount, Size=${msgSizeBytes}B")
+    val coresPerExecutor = spark.conf.get("spark.executor.cores", "1").toInt
+    val numExecutors = spark.conf.get("spark.executor.instances", "1").toInt
+    val totalCores = coresPerExecutor * numExecutors
+
+    System.err.println(s"Starting Load Generator: Topic=$topicId, Count=$msgCount, Size=${msgSizeBytes}B")
+    System.err.println(s"Cluster Config: Executors=$numExecutors, CoresPerExec=$coresPerExecutor (Total Cores=$totalCores)")
+    
+    val startTime = System.currentTimeMillis()
 
     // Create payload string
     val payloadString = "x" * msgSizeBytes
     val payloadBytes = payloadString.getBytes("UTF-8")
 
     // Generate DataFrame
-    // Repartition to ensure high parallelism for write
+    // Repartition to ensure high parallelism for write (using totalCores * 2 for good utilization)
     val df = spark.range(msgCount)
-      .repartition(20) 
+      .repartition(totalCores * 2) 
       .select(
         lit(payloadBytes).alias("payload")
       )
@@ -40,12 +47,27 @@ object PubSubLoadGenerator {
     df.write
       .format("pubsub-native")
       .option("topicId", topicId)
-      .option("batchSize", "2000") // Larger batches for throughput
+      .option("batchSize", "500") // Balanced for safe 10MB limit
       .option("lingerMs", "100")   // Fast flush
       .mode("append") // PubSub only supports append
       .save()
+      
+    val endTime = System.currentTimeMillis()
+    val durationSec = (endTime - startTime) / 1000.0
+    val totalMb = (msgCount * msgSizeBytes) / (1024.0 * 1024.0)
+    val throughputMbS = if (durationSec > 0) totalMb / durationSec else 0.0
+    val msgsPerSec = if (durationSec > 0) msgCount / durationSec else 0.0
+    
+    val mbSPerCore = if (totalCores > 0) throughputMbS / totalCores else 0.0
+    val msgsSPerCore = if (totalCores > 0) msgsPerSec / totalCores else 0.0
 
-    println("Load Generation Complete.")
+    System.err.println("=================================================")
+    System.err.println("Load Generation Complete.")
+    System.err.println(f"Duration: $durationSec%.2f seconds")
+    System.err.println(f"Total Data: $totalMb%.2f MB")
+    System.err.println(f"Avg Throughput: $throughputMbS%.2f MB/s ($mbSPerCore%.2f MB/s/core)")
+    System.err.println(f"Avg Msg Rate: $msgsPerSec%.2f msgs/sec ($msgsSPerCore%.2f msgs/s/core)")
+    System.err.println("=================================================")
     spark.stop()
   }
 }

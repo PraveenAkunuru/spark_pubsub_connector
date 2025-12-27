@@ -14,19 +14,22 @@ import java.nio.file.Files
  */
 object NativeLoader {
   private var loaded = false
-  private val LIB_NAME = "native_pubsub_connector"
+  private val LIB_NAME = "native_pubsub_v3"
 
   /**
    * Triggers the loading of the native library if it hasn't been loaded yet.
    */
   def load(): Unit = synchronized {
     if (!loaded) {
+      System.err.println(s"NativeLoader: Attempting to load $LIB_NAME")
       try {
         // Step 1: Try java.library.path
         System.loadLibrary(LIB_NAME)
+        System.err.println(s"NativeLoader: Successfully loaded $LIB_NAME via System.loadLibrary")
         loaded = true
       } catch {
-        case _: UnsatisfiedLinkError =>
+        case e: UnsatisfiedLinkError =>
+          System.err.println(s"NativeLoader: System.loadLibrary($LIB_NAME) failed: ${e.getMessage}. Falling back to classpath extraction.")
           // Step 2: Fallback to classpath extraction
           loadFromClasspath()
           loaded = true

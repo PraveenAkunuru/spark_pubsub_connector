@@ -16,7 +16,7 @@ class NativeWriterIntegrationTest extends AnyFunSuite {
     val topicId = "test-topic"
 
     val writer = new NativeWriter()
-    val ptr = writer.init(projectId, topicId, "")
+    val ptr = writer.init(projectId, topicId, "", 0)
     assert(ptr != 0, "NativeWriter init failed")
 
     // Create Arrow Data

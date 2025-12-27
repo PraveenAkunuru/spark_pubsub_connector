@@ -12,7 +12,7 @@ class NegativeWriterTest extends AnyFunSuite {
     NativeReader.load()
     val writer = new NativeWriter()
     // Empty project ID should fail
-    val ptr = writer.init("", "topic", null)
+    val ptr = writer.init("", "topic", null, 0)
     // Rust client might allow empty projectId during structural init and fail only on connection.
     // So we can't assert ptr == 0.
     if (ptr != 0) {
@@ -31,7 +31,7 @@ class NegativeWriterTest extends AnyFunSuite {
     val projectId = "spark-test-project"
     val topicId = "test-topic"
     val writer = new NativeWriter()
-    val ptr = writer.init(projectId, topicId, "")
+    val ptr = writer.init(projectId, topicId, "", 0)
     // If init fails (e.g. emulator not reachable), this test is invalid locally but valid in suite.
     if (ptr != 0) {
       val allocator = new RootAllocator()
@@ -69,7 +69,7 @@ class NegativeWriterTest extends AnyFunSuite {
     val projectId = "spark-test-project"
     val topicId = "test-topic"
     val writer = new NativeWriter()
-    val ptr = writer.init(projectId, topicId, "")
+    val ptr = writer.init(projectId, topicId, "", 0)
 
     if (ptr != 0) {
       val allocator = new RootAllocator()
@@ -98,7 +98,7 @@ class NegativeWriterTest extends AnyFunSuite {
     val projectId = "spark-test-project"
     val topicId = "test-topic"
     val writer = new NativeWriter()
-    val ptr = writer.init(projectId, topicId, "")
+    val ptr = writer.init(projectId, topicId, "", 0)
 
     if (ptr != 0) {
       val allocator = new RootAllocator()

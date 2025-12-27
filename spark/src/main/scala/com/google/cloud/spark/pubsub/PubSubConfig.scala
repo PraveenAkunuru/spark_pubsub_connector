@@ -15,7 +15,10 @@ object PubSubConfig {
   val NUM_PARTITIONS_DEFAULT = "1"
   /** Maximum number of messages per batch. */
   val BATCH_SIZE_KEY = "batchSize"
-  val DEFAULT_BATCH_SIZE = 100
+  val DEFAULT_BATCH_SIZE = 2000 // Higher throughput default with persistence
+  /** Wait time for reading from native buffer in milliseconds. */
+  val READ_WAIT_MS_KEY = "readWaitMs"
+  val DEFAULT_READ_WAIT_MS = "2000"
   /** Time to wait for more messages before publishing a batch. */
   val LINGER_MS_KEY = "lingerMs"
   val DEFAULT_LINGER_MS = 1000
@@ -33,6 +36,9 @@ object PubSubConfig {
   val AVRO_SCHEMA_KEY = "avroSchema"
   /** Optional explicit CA certificate path. */
   val CA_CERTIFICATE_PATH_KEY = "caCertificatePath"
+  /** Expected throughput in MB/s for intelligent partitioning. */
+  val EXPECTED_THROUGHPUT_MB_S_KEY = "expectedThroughputMbS"
+  val DEFAULT_EXPECTED_THROUGHPUT = "100"
 
   /**
    * Helper to retrieve a configuration value with the following precedence:

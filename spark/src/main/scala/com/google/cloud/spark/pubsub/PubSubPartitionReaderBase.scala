@@ -35,7 +35,8 @@ abstract class PubSubPartitionReaderBase[T](
       partition.projectId, 
       partition.subscriptionId, 
       partition.jitterMillis, 
-      schemaJson
+      schemaJson,
+      partition.partitionId
     )
   } catch {
     case e: Throwable =>
@@ -65,7 +66,7 @@ abstract class PubSubPartitionReaderBase[T](
     val arrowSchema = ArrowSchema.allocateNew(allocator)
 
     try {
-      val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress())
+      val result = reader.getNextBatch(nativePtr, partition.batchId, arrowArray.memoryAddress(), arrowSchema.memoryAddress(), partition.batchSize, partition.readWaitMs)
       logDebug(s"fetchNativeBatch: batchId=${partition.batchId}, partition=${partition.partitionId}, result=$result")
       
       if (result > 0) {
@@ -95,6 +96,18 @@ abstract class PubSubPartitionReaderBase[T](
     tc.addTaskCompletionListener[Unit] { _ =>
       close()
     }
+  }
+
+  override def currentMetricsValues(): Array[org.apache.spark.sql.connector.metric.CustomTaskMetric] = {
+    Array(
+      PubSubTaskMetric("native_off_heap_memory_bytes", reader.getNativeMemoryUsageNative()),
+      PubSubTaskMetric("native_unacked_messages", reader.getUnackedCount(nativePtr).toLong),
+      PubSubTaskMetric("ingested_bytes", reader.getIngestedBytesNative()),
+      PubSubTaskMetric("ingested_messages", reader.getIngestedMessagesNative()),
+      PubSubTaskMetric("native_read_errors", reader.getReadErrorsNative()),
+      PubSubTaskMetric("native_retry_count", reader.getRetryCountNative()),
+      PubSubTaskMetric("native_ack_latency_micros", reader.getAckLatencyMicrosNative())
+    )
   }
 
   private var closed = false

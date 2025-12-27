@@ -37,7 +37,7 @@ lazy val javaOpts = Seq(
 
 
 
-lazy val copyNativeLibs = taskKey[Unit]("Copies native libraries to resources")
+lazy val copyNativeLibs = taskKey[Seq[File]]("Copies native libraries to resources")
 
 lazy val commonSettings = Seq(
   version := "0.1.0",
@@ -74,13 +74,16 @@ lazy val commonSettings = Seq(
         val destFile = platformDir / libName
         IO.copyFile(sourceFile, destFile)
         log.info(s"Copied native lib to $destFile")
+        Seq(destFile)
       } else {
         log.warn(s"Native lib not found at $sourceFile. Run 'cargo build --release' in native/ first.")
+        Seq.empty
       }
+    } else {
+      Seq.empty
     }
   },
-  // Run copyNativeLibs before Compile
-  Compile / compile := ((Compile / compile) dependsOn copyNativeLibs).value
+  Compile / resourceGenerators += copyNativeLibs.taskValue
 )
 
 lazy val spark33 = (project in file("spark33"))

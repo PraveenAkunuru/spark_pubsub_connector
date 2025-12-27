@@ -65,15 +65,41 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
    */
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
     logDebug(s"planInputPartitions called with start=$start, end=$end")
-    val defaultParallelism = spark.sparkContext.defaultParallelism
-    val intelligentDefault = defaultParallelism * 2 // 2x cores for optimal Pub/Sub throughput
-
-    val requestedPartitions = options.get(PubSubConfig.NUM_PARTITIONS_KEY)
-      .map(_.toInt)
-      .getOrElse(intelligentDefault)
     
-    val numPartitions = requestedPartitions
-    logInfo(s"Planning $numPartitions input partitions (Default Parallelism: $defaultParallelism, Intelligent Default: $intelligentDefault)")
+    logInfo(s"Options: $options")
+    val requestedPartitions = options.get(PubSubConfig.NUM_PARTITIONS_KEY).map(_.toInt)
+    logInfo(s"Requested Partitions: $requestedPartitions")
+    
+    val numPartitions = requestedPartitions.getOrElse {
+      val conf = spark.sparkContext.getConf
+      
+      // Diagnostic logging to understand environment
+      logInfo("Spark Configuration for Partitioning:")
+      conf.getAll.filter(p => 
+        p._1.contains("executor") || p._1.contains("dynamicAllocation") || p._1.contains("master")
+      ).foreach(p => logInfo(s"  ${p._1} = ${p._2}"))
+
+      val coresPerExecutor = conf.getOption("spark.executor.cores").map(_.toInt).getOrElse(1)
+      val numExecutors = conf.getOption("spark.executor.instances").map(_.toInt)
+        .orElse(conf.getOption("spark.dynamicAllocation.maxExecutors").map(_.toInt))
+        .getOrElse(Math.max(1, spark.sparkContext.defaultParallelism / coresPerExecutor))
+      
+      val totalCores = numExecutors * coresPerExecutor
+      // Use the max of config-based cores and current active cores
+      val cores = Math.max(totalCores, spark.sparkContext.defaultParallelism)
+      
+      val expectedMbS = PubSubConfig.getOption(PubSubConfig.EXPECTED_THROUGHPUT_MB_S_KEY, options, spark)
+        .getOrElse(PubSubConfig.DEFAULT_EXPECTED_THROUGHPUT).toInt
+      
+      val tFloor = Math.ceil(expectedMbS / 8.0).toInt
+      val pHeadroom = cores * 3
+      
+      val base = Math.max(tFloor, pHeadroom)
+      val hcn = findNextHighlyCompositeNumber(base)
+      
+      logInfo(s"Intelligent Partitioning: cores=$cores (executors=$numExecutors, coresPerExec=$coresPerExecutor), expectedMbS=$expectedMbS => base=$base, hcn=$hcn")
+      hcn
+    }
 
     // Decrement TTL for all pending commits and filter out expired ones
     val expiredBatches = scala.collection.mutable.ListBuffer[String]()
@@ -85,27 +111,39 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       }
     }
     expiredBatches.foreach(pendingCommits.remove)
-    
+    logInfo(s"Planning $numPartitions input partitions")
+
     val committedSignals = pendingCommits.keys.toList
-    
-    // Once prioritized for planning, we assume they will be acked by one of the tasks.
-    // In a multi-executor environment, all executors on the cluster will receive this signal
-    // and flush their local reservoirs for these batch IDs.
-    
     
     val jitterMillis = PubSubConfig.getOption(PubSubConfig.JITTER_MS_KEY, options, spark)
       .getOrElse(PubSubConfig.DEFAULT_JITTER_MS).toInt
     val format = PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options, spark)
     val avroSchema = PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options, spark)
     val caCertificatePath = PubSubConfig.getOption(PubSubConfig.CA_CERTIFICATE_PATH_KEY, options, spark)
+    val readBatchSize = PubSubConfig.getOption(PubSubConfig.BATCH_SIZE_KEY, options, spark)
+      .getOrElse(PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
+    val readWaitMs = PubSubConfig.getOption(PubSubConfig.READ_WAIT_MS_KEY, options, spark)
+      .getOrElse(PubSubConfig.DEFAULT_READ_WAIT_MS).toLong
 
     (0 until numPartitions).map { i =>
-      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema, caCertificatePath)
+      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema, caCertificatePath, readBatchSize, readWaitMs)
     }.toArray
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
     new PubSubPartitionReaderFactory(schema)
+  }
+
+  /**
+   * Returns the smallest Highly Composite Number greater than or equal to n.
+   * HCNs are numbers with more divisors than any smaller positive integer.
+   * They are ideal for Spark because they can be divided evenly into many smaller sizes.
+   */
+  private def findNextHighlyCompositeNumber(n: Int): Int = {
+    val hcns = Array(
+      1, 2, 4, 6, 12, 24, 36, 48, 60, 120, 180, 240, 360, 720, 840, 1260, 1680, 2520, 5040, 7560, 10080, 15120, 20160, 25200, 27720, 45360, 50400, 55440, 83160, 110880
+    )
+    hcns.find(_ >= n).getOrElse(n)
   }
 }
 
@@ -128,7 +166,9 @@ case class PubSubInputPartition(
     jitterMillis: Int,
     format: Option[String],
     avroSchema: Option[String],
-    caCertificatePath: Option[String]) extends InputPartition
+    caCertificatePath: Option[String],
+    batchSize: Int,
+    readWaitMs: Long) extends InputPartition
 
 /**
  * Factory class that initializes `PubSubPartitionReader` on the executors.
@@ -257,27 +297,4 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
   }
 }
 
-/**
- * Custom metrics for Pub/Sub.
- * Spark 3.5 requires a 0-arg constructor for metric aggregation.
- */
-class PubSubCustomMetric extends org.apache.spark.sql.connector.metric.CustomMetric {
-  private var metricName: String = "unknown"
-  private var metricDescription: String = "unknown"
 
-  def this(name: String, description: String) = {
-    this()
-    this.metricName = name
-    this.metricDescription = description
-  }
-
-  override def name(): String = metricName
-  override def description(): String = metricDescription
-  override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = taskMetrics.sum.toString
-}
-
-case class PubSubCustomTaskMetric(metricName: String, metricValue: Long) 
-  extends org.apache.spark.sql.connector.metric.CustomTaskMetric {
-  override def name(): String = metricName
-  override def value(): Long = metricValue
-}
