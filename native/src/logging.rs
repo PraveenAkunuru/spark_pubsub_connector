@@ -16,6 +16,7 @@ use std::sync::mpsc::SyncSender;
 use std::cell::RefCell;
 
 static SENDER: OnceLock<SyncSender<(Level, String)>> = OnceLock::new();
+static DROPPED_LOGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 thread_local! {
     static LOG_CONTEXT: RefCell<String> = const { RefCell::new(String::new()) };
@@ -46,7 +47,9 @@ impl Log for JniLogger {
                     format!("{} {}", context, record.args())
                 };
                 // Use try_send to avoid blocking if the channel is full
-                let _ = tx.try_send((record.level(), msg));
+                if let Err(_) = tx.try_send((record.level(), msg)) {
+                    DROPPED_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
         }
     }
@@ -69,7 +72,8 @@ pub fn init(env: &jni::JNIEnv) {
 }
 
 fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<(Level, String)>(10000);
+    // Increased buffer size to 20k to handle high-throughput bursts
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(Level, String)>(20000);
 
     let (level_filter, is_debug) = match std::env::var("RUST_LOG").ok().as_deref() {
         Some("error") => (log::LevelFilter::Error, false),

@@ -17,45 +17,40 @@ mod arrow_convert;
 use pubsub::PubSubClient;
 use tokio::runtime::Runtime;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+use robusta_jni::jni::sys::jlong;
 
-/// ABI-compatible mirrors for Arrow FFI structures. 
-/// These are used to validate memory layouts and pointers before importing them into `arrow-rs`.
-/// They are necessary because the official `FFI_ArrowSchema` and `FFI_ArrowArray` do not expose 
-/// all internal fields needed for proactive validation.
-#[repr(C)]
-pub struct FfiArrowSchemaMirror {
-    pub format: *const std::ffi::c_char,
-    pub name: *const std::ffi::c_char,
-    pub metadata: *const std::ffi::c_char,
-    pub flags: i64,
-    pub n_children: i64,
-    pub children: *mut *mut FFI_ArrowSchema,
-    pub dictionary: *mut FFI_ArrowSchema,
-    pub release: Option<unsafe extern "C" fn(*mut FFI_ArrowSchema)>,
-    pub private_data: *mut std::ffi::c_void,
+/// Helper to safeguard FFI pointers before accessing them.
+struct FFIGuard {
+    array: *mut FFI_ArrowArray,
+    schema: *mut FFI_ArrowSchema,
 }
 
-#[repr(C)]
-pub struct FfiArrowArrayMirror {
-    pub length: i64,
-    pub null_count: i64,
-    pub offset: i64,
-    pub n_buffers: i64,
-    pub n_children: i64,
-    pub buffers: *mut *const std::ffi::c_void,
-    pub children: *mut *mut FFI_ArrowArray,
-    pub dictionary: *mut FFI_ArrowArray,
-    pub release: Option<unsafe extern "C" fn(*mut FFI_ArrowArray)>,
-    pub private_data: *mut std::ffi::c_void,
+impl FFIGuard {
+    /// Validates that FFI pointers are non-null and properly aligned.
+    ///
+    /// # Safety
+    /// This function checks alignment but trusts that the pointers are valid objects if aligned.
+    unsafe fn new(array: jlong, schema: jlong) -> Result<Self, &'static str> {
+        if array == 0 || schema == 0 {
+            return Err("Received NULL pointer for Arrow FFI");
+        }
+        
+        let array_ptr = array as *mut FFI_ArrowArray;
+        let schema_ptr = schema as *mut FFI_ArrowSchema;
+
+        if array_ptr.align_offset(std::mem::align_of::<FFI_ArrowArray>()) != 0 {
+            return Err("Arrow Array pointer is misaligned");
+        }
+        if schema_ptr.align_offset(std::mem::align_of::<FFI_ArrowSchema>()) != 0 {
+            return Err("Arrow Schema pointer is misaligned");
+        }
+
+        Ok(Self {
+            array: array_ptr,
+            schema: schema_ptr,
+        })
+    }
 }
-
-/// # Safety
-/// This is a no-op release function for Arrow FFI. It does not free any memory.
-pub unsafe extern "C" fn noop_release_array(_array: *mut FFI_ArrowArray) {}
-
-/// # Safety
-/// This is a no-op release function for Arrow FFI. It does not free any memory.
-pub unsafe extern "C" fn noop_release_schema(_schema: *mut FFI_ArrowSchema) {}
 
 /// Helper for panic safety in JNI calls.
 /// 
@@ -99,6 +94,7 @@ mod jni {
     use robusta_jni::jni::sys::jlong;
     use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
     use arrow::array::{StructArray, Array};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     
     /// JNI wrapper for `NativeReader` on the Scala side.
     /// Manages message ingestion from Pub/Sub and conversion to Arrow batches.
@@ -114,9 +110,10 @@ mod jni {
         /// Initializes a new `PubSubClient` with the given project and subscription.
         /// Returns a raw pointer (as `jlong`) to a `RustPartitionReader`.
         pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String, partition_id: i32) -> jlong {
+            // Centralized Logging Init: Ensure every new reader ensures logging is ready
+            crate::logging::init(env);
+            
             crate::safe_jni_call(0, || {
-                // Pre-initialize JNI logging to allow early log correlation
-                crate::logging::init(env);
                 crate::logging::set_context(&format!("[Partition: {}]", partition_id));
                 log::info!("Rust: NativeReader.init called for project: {}, sub: {}", project_id, subscription_id);
 
@@ -162,29 +159,20 @@ mod jni {
                 };
 
                 let rt = crate::pubsub::get_runtime();
-                let sub_key = (subscription_id.clone(), partition_id);
+                let _sub_key = (subscription_id.clone(), partition_id);
 
-                // Try to reuse existing client from registry
-                let client = if let Some((_, c)) = crate::pubsub::CLIENT_REGISTRY.remove(&sub_key) {
-                    log::info!("Rust: Reusing existing PubSubClient for partition {}", partition_id);
-                    c
-                } else {
-                    log::info!("Rust: Creating new PubSubClient for partition {}", partition_id);
-                    let client_res = rt.block_on(async {
-                        PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
-                    });
+                log::info!("Rust: Creating new PubSubClient for partition {}", partition_id);
+                let client_res = rt.block_on(async {
+                    PubSubClient::new(&project_id, &subscription_id, config.ca_certificate_path.as_deref()).await
+                });
 
-                    match client_res {
-                        Ok(c) => {
-                            crate::pubsub::start_deadline_manager(rt, config.ca_certificate_path.clone());
-                            c
-                        }
-                        Err(e) => {
-                            let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
-                            log::error!("{}", err_msg);
-                            let _ = env.throw_new("java/lang/RuntimeException", err_msg);
-                            return 0;
-                        }
+                let client = match client_res {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
+                        log::error!("{}", err_msg);
+                        let _ = env.throw_new("java/lang/RuntimeException", err_msg);
+                        return 0;
                     }
                 };
 
@@ -207,6 +195,18 @@ mod jni {
                 if reader_ptr == 0 { return -1; }
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
                 crate::logging::set_context(&format!("[P: {}, B: {}]", reader.partition_id, batch_id));
+
+                // 0. Check Reservoir Limit (Backpressure)
+                // 0. Check Batch Map for excessive unacked if needed (Backpressure)
+                // For now, relying on high-level library flow control.
+                // But we can check HANDLE_MAP size.
+                {
+                    let unacked = crate::pubsub::ACK_HANDLE_MAP.len();
+                    if unacked >= 200_000 {
+                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
+                         return 0; 
+                    }
+                }
 
                 // Blocking fetch from native buffer (with short timeout)
                 let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
@@ -235,10 +235,9 @@ mod jni {
                 }
 
                 // Register batch in Ack Reservoir
+                // Register batch in BATCH_ACK_MAP
                 {
-                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                    let batch_map = reservoir.entry(batch_id).or_insert_with(|| (crate::pubsub::ack_reservoir_instant_now(), std::collections::HashMap::new()));
-                    batch_map.1.insert(reader.client.subscription_name.clone(), ack_ids);
+                    crate::pubsub::BATCH_ACK_MAP.insert(batch_id, ack_ids);
                 }
 
                 let (arrays, schema) = builder.finish();
@@ -247,16 +246,22 @@ mod jni {
                 ));
 
                 // Export to FFI
+                // Export to FFI
                 unsafe {
-                    let array_ptr = arrow_array_addr as *mut FFI_ArrowArray;
-                    let schema_ptr = arrow_schema_addr as *mut FFI_ArrowSchema;
-                    
-                    let data = struct_array.to_data();
-                    let ffi_array = FFI_ArrowArray::new(&data);
-                    let ffi_schema = FFI_ArrowSchema::try_from(data.data_type()).unwrap();
+                    match crate::FFIGuard::new(arrow_array_addr, arrow_schema_addr) {
+                        Ok(guard) => {
+                            let data = struct_array.to_data();
+                            let ffi_array = FFI_ArrowArray::new(&data);
+                            let ffi_schema = FFI_ArrowSchema::try_from(data.data_type()).unwrap();
 
-                    std::ptr::write(array_ptr, ffi_array);
-                    std::ptr::write(schema_ptr, ffi_schema);
+                            std::ptr::write(guard.array, ffi_array);
+                            std::ptr::write(guard.schema, ffi_schema);
+                        },
+                        Err(e) => {
+                             log::error!("Rust: FFI Guard failed during read export: {}", e);
+                             return -3;
+                        }
+                    }
                 }
 
                 1
@@ -287,12 +292,9 @@ mod jni {
 
                 let mut all_ack_ids = Vec::new();
                 {
-                    let mut reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
                     for id in batch_ids {
-                        if let Some((_, mut subs)) = reservoir.remove(&id) {
-                            if let Some(ids) = subs.remove(&reader.client.subscription_name) {
-                                all_ack_ids.extend(ids);
-                            }
+                        if let Some((_, ids)) = crate::pubsub::BATCH_ACK_MAP.remove(&id) {
+                            all_ack_ids.extend(ids);
                         }
                     }
                 }
@@ -312,8 +314,7 @@ mod jni {
         /// Returns the count of messages currently held in the off-heap Ack Reservoir.
         pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
             crate::safe_jni_call(0, || {
-                let reservoir = crate::pubsub::ACK_RESERVOIR.lock().unwrap_or_else(|e| e.into_inner());
-                reservoir.values().map(|(_, subs)| subs.values().map(|v| v.len()).sum::<usize>()).sum::<usize>() as i32
+                crate::pubsub::ACK_HANDLE_MAP.len() as i32
             })
         }
 
@@ -359,11 +360,7 @@ mod jni {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
                     let reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
-                    let sub_key = (reader.client.subscription_name.clone(), reader.partition_id);
-                    
-                    log::debug!("Rust: Returning PubSubClient for partition {} to registry", reader.partition_id);
-                    crate::pubsub::CLIENT_REGISTRY.insert(sub_key, reader.client);
-                    // reader (the metadata wrapper) is dropped here, but client is saved in registry
+                    log::info!("Rust: Dropping PubSubClient and background task for partition {}", reader.partition_id);
                 }
             })
         }
@@ -433,94 +430,23 @@ mod jni {
                 
                 // SAFETY: We own the memory addresses passed from Java via the C Data Interface.
                 // We use std::ptr::read to take ownership of the FFI structs.
+                // SAFETY: We use FFIGuard to validate pointers before importing
                 unsafe {
-                    let array_ptr = arrow_array_addr as *mut FFI_ArrowArray;
-                    let schema_ptr = arrow_schema_addr as *mut FFI_ArrowSchema;
-
-                    // 1. Validate Schema before taking full ownership (peek without dropping)
-                    // We cast to our mirror struct to check fields.
-                    // Note: We don't read it yet, just inspect the raw pointer content.
-                    let schema_mirror = &*(schema_ptr as *const crate::FfiArrowSchemaMirror);
-                    
-                    if schema_mirror.n_children > 0 {
-                        if schema_mirror.children.is_null() {
-                            log::error!("Rust: FFI Error - Schema n_children is {} but children pointer is NULL", schema_mirror.n_children);
-                            // If we return here, we haven't called std::ptr::read(), so we haven't taken ownership "in Rust terms".
-                            // However, the caller (Java/Spark) expects us to take ownership.
-                            // If we don't, Spark might double free or leak?
-                            // Spark Arrow: "The consumer is responsible for releasing the memory."
-                            // If we error, we must still release the input if we "consumed" the responsibility.
-                            // But usually if FFI fails, we should release what we got.
-                            // To be safe: we import it to release it.
-                            let schema_val = std::ptr::read(schema_ptr);
-                             // Clean up properly by letting Arrow drop it?
-                             // FFI_ArrowSchema implements Drop? No, we need to call release callback manually if we don't convert.
-                             // Best way: Import fully, then drop.
-                             let _ = arrow::ffi::from_ffi(std::mem::zeroed(), &schema_val); // This is hacky.
-                             // Better: Just release manually using the callback.
-                             if let Some(release) = schema_mirror.release {
-                                 release(schema_ptr);
-                             }
-                            return -20;
+                    let guard = match crate::FFIGuard::new(arrow_array_addr, arrow_schema_addr) {
+                        Ok(g) => g,
+                        Err(e) => {
+                            log::error!("Rust: FFI Guard failed during write import: {}", e);
+                            return -2;
                         }
-                    }
+                    };
 
-                    // Now we take ownership safely
-                    let array_val_raw = std::ptr::read(array_ptr);
-                    let schema_val_raw = std::ptr::read(schema_ptr);
-                    
-                    // Arrays are now owned. If we fail from here on, we MUST drop them.
-                    // arrow::ffi::from_ffi takes these by value (moves them).
-                    // But wait, from_ffi call signature: `pub fn from_ffi(array: FFI_ArrowArray, schema: &FFI_ArrowSchema) -> Result<ArrayData, ArrowError>`
-                    // It takes `array` by value (consumes), but `schema` by reference?? 
-                    // No, `from_ffi` signature is: `fn from_ffi(array: FFI_ArrowArray, schema: &FFI_ArrowSchema)`.
-                    // It does NOT consume schema. We still own schema.
-
-                    // 3. Import into arrow-rs
-                    let array_data = match arrow::ffi::from_ffi(array_val_raw, &schema_val_raw) {
+                    // Import from FFI using official API
+                    // Note: `from_ffi` validates the schema/array internally
+                    let array_data = match arrow::ffi::from_ffi(std::ptr::read(guard.array), &std::ptr::read(guard.schema)) {
                         Ok(data) => data,
                         Err(e) => {
-                            log::error!("Rust: Failed to import Arrow array from FFI: {:?}", e);
-                            // We own array_val_raw and schema_val_raw. We must drop/release them.
-                            // Schema we still own. Array was moved into from_ffi? No, only matching success? 
-                            // `from_ffi` takes ownership of `array`. If it fails, does it drop `array`?
-                            // Looking at arrow-rs source: if it returns Err, it likely drops the input FFI_ArrowArray.
-                            // But we DEFINITELY own schema_val_raw. Arrow-rs struct doesn't implement Drop that calls release.
-                            // We need to validly release the schema.
-                             // Actually, FFI_ArrowSchema and FFI_ArrowArray DO NOT implement Drop to call release.
-                             // We must call release manually if we don't successfully convert to something that manages it.
-                            
-                            // NOTE: Arrow C Data Interface says: "The release callback is responsible for releasing the memory."
-                            // If we successfully imported `array_data` (Data type), it manages release.
-                            // If `from_ffi` failed, we need to ensure release is called.
-                            // THIS IS TRICKY. 
-                            // Safe bet: We check if they are released.
-                            // Actually, let's just use the `ArrowArray` and `ArrowSchema` wrappers from arrow::ffi if possible?
-                            // They are not exposed easily.
-                            
-                            // Manual release fall-back:
-                            // We just cast back to mirror and call release.
-                            let sm: crate::FfiArrowSchemaMirror = std::mem::transmute(schema_val_raw);
-                            if let Some(r) = sm.release { r(schema_ptr); } // Use original pointer or struct?
-                            // We moved std::ptr::read, so the struct is on stack. We call release on the STRUCT pointer?
-                            // The release callback expects `*mut FFI_ArrowSchema`.
-                            // We need to pass a pointer to our stack object? No, the release callback usually frees the `private_data`.
-                            // It doesn't free the struct itself if it's stack allocated, but it frees the buffers.
-                            // But `std::ptr::read` COPIED the struct content to stack. The original pointer `schema_ptr` points to valid memory?
-                            // Yes, in C Data Interface, the struct itself is allocated by caller.
-                            // We should call release on the `schema_ptr`!
-                            // wait, we `std::ptr::read` it, so we effectively "moved" it. 
-                            // But the resources are pointed to by fields.
-                            // If we call release on `schema_ptr`, it cleans up resources.
-                            // Our stack copy is just a copy of pointers.
-                            // CORRECT FIX: Just call release on the ORIGINAL pointers if import fails.
-                             let sm_ref = &*(schema_ptr as *const crate::FfiArrowSchemaMirror);
-                             if let Some(r) = sm_ref.release { r(schema_ptr); }
-
-                             let am_ref = &*(array_ptr as *const crate::FfiArrowArrayMirror);
-                             if let Some(r) = am_ref.release { r(array_ptr); }
-
-                            return -2;
+                            log::error!("Rust: FFI Import failed: {:?}", e);
+                            return -3;
                         }
                     };
                     
@@ -532,7 +458,7 @@ mod jni {
                          Ok(m) => m,
                          Err(e) => {
                              log::error!("Rust: Failed to convert batch to PubsubMessages: {:?}", e);
-                             return -3;
+                             return -4;
                          }
                     };
 
@@ -542,10 +468,10 @@ mod jni {
                     
                     if let Err(e) = res {
                         log::error!("Rust: Failed to publish batch: {:?}", e);
-                        return -4;
+                        return -5;
                     }
                     1
-                }
+                } // end unsafe
             })
         }
 

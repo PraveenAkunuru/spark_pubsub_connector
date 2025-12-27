@@ -18,7 +18,7 @@ dashmap = "5.5"
 robusta_jni = "0.2"
 openssl = "0.10"
 futures = "0.3"
-google-cloud-googleapis = { version = "0.15", features = ["pubsub"] }
+google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-auth = "0.16"
 google-cloud-token = "0.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -31,3 +31,4 @@ tokio-stream = "0.1"
 home = "=0.5.9"
 rand = "0.8"
 apache-avro = "0.16"
+google-cloud-pubsub = "0.30.0"
