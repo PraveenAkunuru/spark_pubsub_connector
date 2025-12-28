@@ -83,7 +83,18 @@ lazy val commonSettings = Seq(
       Seq.empty
     }
   },
-  Compile / resourceGenerators += copyNativeLibs.taskValue
+  Compile / resourceGenerators += copyNativeLibs.taskValue,
+  assembly / assemblyMergeStrategy := {
+    case PathList("org", "apache", "commons", "logging", _*) => MergeStrategy.first
+    case PathList("org", "apache", "spark", "unused", "UnusedStubClass.class") => MergeStrategy.first
+    case "arrow-git.properties" => MergeStrategy.discard
+    case "mozilla/public-suffix-list.txt" => MergeStrategy.first
+    case "module-info.class" => MergeStrategy.discard
+    case PathList("META-INF", "versions", xs @ _*) => MergeStrategy.first
+    case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+    case PathList("META-INF", xs @ _*) => MergeStrategy.discard
+    case _ => MergeStrategy.first
+  }
 )
 
 lazy val spark33 = (project in file("spark33"))
@@ -131,13 +142,7 @@ lazy val spark35 = (project in file("spark35"))
       "com.fasterxml.jackson.core" % "jackson-databind" % "2.15.2",
       "com.fasterxml.jackson.core" % "jackson-core" % "2.15.2",
       "com.fasterxml.jackson.module" %% "jackson-module-scala" % "2.15.2"
-    ),
-    assembly / assemblyMergeStrategy := {
-      case "org/apache/commons/logging/impl/NoOpLog.class" => MergeStrategy.discard
-      case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
-      case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-      case _ => MergeStrategy.first
-    }
+    )
   )
 
 lazy val spark40 = (project in file("spark40"))

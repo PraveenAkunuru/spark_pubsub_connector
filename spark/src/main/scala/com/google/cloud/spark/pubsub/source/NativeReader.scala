@@ -1,0 +1,87 @@
+package com.google.cloud.spark.pubsub.source
+
+import com.google.cloud.spark.pubsub.core.NativeLoader
+
+/**
+ * Interface to the native Rust Pub/Sub reader.
+ *
+ * This class uses JNI to delegate high-performance data ingestion to a Rust-based data plane.
+ * It is separated from the Spark-specific stream logic to provide a clean FFI boundary.
+ *
+ * The native reader manages its own Tokio runtime and maintains a background StreamingPull
+ * connection to Google Cloud Pub/Sub, buffering messages for low-latency retrieval.
+ */
+class NativeReader {
+  // Ensure library is loaded when instance is created
+  NativeLoader.load()
+
+  /**
+   * Initializes the native Pub/Sub client for a specific subscription.
+   * Returns a raw pointer (Long) to the Rust state.
+   */
+  @native def init(projectId: String, subscriptionId: String, jitterMillis: Int, schemaJson: String, partitionId: Int): Long
+
+  /**
+   * Fetches a batch of messages from the native buffer and exports them to Arrow memory addresses.
+   * Returns 1 if messages were fetched, 0 if empty, or negative on error.
+   */
+  @native def getNextBatch(readerPtr: Long, batchId: String, arrowArrayAddr: Long, arrowSchemaAddr: Long, maxMessages: Int, waitMs: Long): Int
+
+  /**
+   * Sends an asynchronous Acknowledgment request for the given list of message IDs.
+   */
+  @native def acknowledge(readerPtr: Long, ackIds: java.util.List[String]): Int
+
+
+  /**
+   * Flushes the native reservoir for the given committed batches.
+   */
+  @native def ackCommitted(readerPtr: Long, batchIds: java.util.List[String]): Int
+
+  /**
+   * Returns the count of messages currently held in the off-heap Ack Reservoir.
+   */
+  @native def getUnackedCount(readerPtr: Long): Int
+
+  /**
+   * Returns the estimated size (bytes) of messages buffered in the native layer (off-heap).
+   */
+  @native def getNativeMemoryUsageNative(): Long
+
+  /**
+   * Returns the cumulative count of bytes ingested from Pub/Sub.
+   */
+  @native def getIngestedBytesNative(): Long
+
+  /**
+   * Returns the cumulative count of messages ingested from Pub/Sub.
+   */
+  @native def getIngestedMessagesNative(): Long
+
+  /**
+   * Returns the cumulative count of gRPC read/ack errors.
+   */
+  @native def getReadErrorsNative(): Long
+
+  /**
+   * Returns the cumulative count of retry attempts.
+   */
+  @native def getRetryCountNative(): Long
+
+  /**
+   * Returns the cumulative time (microseconds) spent in native ACK/deadline calls.
+   */
+  @native def getAckLatencyMicrosNative(): Long
+
+  /**
+   * Shuts down the native client and releases associated resources (runtime, connections).
+   */
+  @native def close(readerPtr: Long): Unit
+}
+
+object NativeReader {
+  // Force loading
+  def load(): Unit = {
+    NativeLoader.load()
+  }
+}

@@ -1,118 +1,95 @@
-# Spark Pub/Sub Connector Architecture
+# System Architecture: The "Split-Brain" Connector
 
-This document provides a comprehensive overview of the Spark Pub/Sub connector's architecture, including its systems design, core modules, technical implementation details, and stability patterns.
-
----
-
-## 1. Design Philosophy: Convention over Configuration
-
-The Spark Pub/Sub Connector is designed to "just work" for 90% of use cases without manual tuning.
-- **Intelligent Defaults**: Parallelism, batching, and authentication are automatically inferred from the environment.
-- **Unified Schema**: A single entry point handles both raw message access and high-performance native JSON/Avro parsing.
-- **ADC-First**: Prioritizes Google Application Default Credentials for seamless GKE/Dataproc integration.
+This document explains how the Spark Pub/Sub Connector achieves high-performance ingestion by splitting its work between two different programming worlds: **The JVM (Scala)** and **The Native Data Plane (Rust)**.
 
 ---
 
-## 2. System Overview
+## 1. The Bottleneck: Why Native?
 
-The Spark Pub/Sub Connector is a high-performance, native integration between Apache Spark (Structured Streaming) and Google Cloud Pub/Sub. It leverages **Apache Arrow** and **Rust** to achieve near-zero-copy data transfer and low-latency message processing.
+Traditional Spark connectors live entirely inside the JVM. When you read 1GB of data from Pub/Sub every second, the JVM creates millions of "garbage" objects to hold that data. This causes the **Garbage Collector (GC)** to run constantly, leading to "Stop-the-World" pauses that freeze your ingestion.
 
-### Key Goals
-- **High Throughput**: Bypasses the JVM Pub/Sub client in favor of a native Rust `tonic` (gRPC) implementation.
-- **Zero-Copy Serialization**: Uses the **Arrow C Data Interface** (FFI) to pass data between the JVM (Spark) and Native (Rust) layers without excessive overhead.
-- **Strictly At-Least-Once**: Native Reservoirs with background deadline management prevent message expiry during complex Spark processing.
-- **Multi-Spark Version Support**: Native binary portability across Spark 3.3, 3.5, and 4.0.
+**Our Approach**:
+We offload the "Hot Path" (fetching, buffer management, and parsing) to Rust. Rust doesn't use a garbage collector, so memory usage is deterministic and efficient.
 
 ---
 
-## 2. High-Level Architecture
+## 2. High-Level Design
 
-The system employs a "split-brain" approach to balance Spark's control plane with the performance requirements of a native data plane.
+We use a "Split-Brain" architecture:
 
 1.  **Spark Control Plane (Scala/JVM)**:
-    - Implements Spark's `DataSourceV2` API.
-    - Handles query planning, partition management, metrics, and schema inference.
-    - Manages the lifecycle of native resources via JNI.
-
+    - Acts as the "Brain".
+    - Negotiates schemas with Spark Catalyst.
+    - Decides how many parallel tasks to run.
+    - Handles offsets and transaction commits.
 2.  **Native Data Plane (Rust)**:
-    - Executes heavy I/O operations (Pub/Sub Publish/Subscribe) on a `tokio` runtime.
-    - Manages gRPC connections and authentication (ADC).
-    - Performs zero-copy conversion between Protobuf and Arrow Interface structures.
+    - Acts as the "Muscles".
+    - Opens multiple gRPC connections to Pub/Sub.
+    - Buffers data in native, off-heap memory.
+    - Converts Protobuf into Columnar Arrow format.
 
-### Component Interaction
+### The Bridges
+- **JNI (Java Native Interface)**: The bridge for commands (e.g., "Start fetching", "Give me a batch").
+- **Arrow C Data Interface**: The high-speed bridge for data. POK (Pointers over Knowledge) allows Spark to read Rust's memory directly without copying.
+
+---
+
+## 3. The Zero-Copy Data Flow
+
+Here is how a single byte of data reaches Spark:
+
 ```mermaid
-graph TD
-    subgraph Spark JVM
-    Spark[Spark Executor] -->|Writes Rows| DataWriter[PubSubDataWriter]
-    DataWriter -->|Buffers| ArrowVec[Arrow FieldVector]
-    ArrowVec -->|Exports FFI| JNI[JNI Bridge]
-    Spark -->|Columnar Reads| ColumnarReader[PubSubColumnarPartitionReader]
-    Spark -->|Row Reads| RowReader[PubSubPartitionReader]
-    ColumnarReader -->|Direct Arrow| JNI
-    RowReader -->|Row Conversion| JNI
-    end
+sequenceDiagram
+    participant P as Pub/Sub Service
+    participant R as Rust Native
+    participant J as JNI Bridge
+    participant S as Spark Executor
 
-    subgraph Native Rust
-    JNI -->|Imports FFI| NativeLib[Native Writer/Reader]
-    NativeLib -->|Async gRPC| PubSubClient[Google Cloud Pub/Sub]
-    NativeLib -->|Off-Heap Reservoirs| AckReservoir[Ack Reservoir]
-    AckReservoir -->|Deadline extension| DeadlineMgr[Deadline Manager]
-    end
+    P->>R: Protobuf Stream (gRPC)
+    R->>R: Deserialize to Native Heap
+    R->>R: Aggregate into Arrow Batch
+    S->>J: reader.next_batch()
+    J->>R: get_batch_pointer()
+    R-->>S: Return Memory Addresses
+    S->>S: Wrap Pointer in VectorSchemaRoot
+    S->>S: Process Columnar Batch (Zero-Copy)
+    S->>R: Release Pointer (Callback)
 ```
 
 ---
 
-## 3. Codebase Map
+## 4. Key Components
 
-### 3.1. Native Layer (Rust) - `native/src/`
-| Module | Role |
-| :--- | :--- |
-| `lib.rs` | **JNI Entry Point**: Defines the JNI bridge and manages native runtime lifecycle. Uses `safe_jni_call` for panic protection. |
-| `pubsub.rs` | **Pub/Sub Client**: Orchestrates background `StreamingPull` and `PublisherClient` gRPC calls with built-in retry logic and connection pooling. |
-| `arrow_convert/` | **Arrow Engine**: Transformation between Pub/Sub messages and Arrow format. `builder.rs` (read/structured parsing) and `reader.rs` (write). |
-| `logging.rs` | **JNI Logger**: Thread-safe bridge forwarding Rust logs to Spark's `NativeLogger` via JNI. |
-
-### 3.2. Spark Layer (Scala) - `spark/src/main/scala/com/google/cloud/spark/pubsub/`
-| Class | Role |
-| :--- | :--- |
-| `PubSubTableProvider` | **Bootstrap**: Handles `pubsub-native` registration and initial schema inference. |
-| `PubSubTable` | **Logical Table**: Declares read/write capabilities and factory for builders. |
-| `PubSubMicroBatchStream` | **Streaming Engine**: Manages offsets and plans parallel partitions for executors. |
-| `PubSubPartitionReader` | **Native Ingest**: Initializes `NativeReader` and manages the data flow from JNI to Spark. |
-| `PubSubDataWriter` | **Native Egress**: Buffers rows and exports them to Arrow FFI for native publishing. |
-| `ArrowUtils` | **Type Mapping**: Centralized translation between Spark `InternalRow` and Arrow `FieldVector`. |
-| `PubSubConfig` | **Configuration**: Centralized keys and JSON construction for the native data plane. |
-
----
-
-## 4. Technical Implementation Details
-
-### 4.1. FFI Ownership Model (Reference Counting)
-Data transfer via the Arrow C Data Interface follows a shared ownership model:
-- **Java -> Rust**: Java allocates, exports, and calls `close()` (decrements ref). Rust imports, processes, and drops (decrements ref). The memory is freed when both sides are done.
-- **Rust -> Java**: Rust allocates and "moves" the struct by writing to Scala-provided memory. Java imports and takes full ownership.
+### 4.1. The Tokio Runtime (`pubsub.rs`)
+The connector hosts a persistent, async Rust runtime.
+- **Dynamic Threads**: It automatically scales the number of background threads based on the hardware it's running on (`available_parallelism`).
+- **Pre-fetching**: It pulls data even while Spark is busy processing the previous batch, keeping the pipeline full.
 
 ### 4.2. Off-Heap Ack Reservoir
-To prevent GC pressure and ensure reliability, `ack_ids` are stored off-heap in Rust:
-1. **Capture**: Immediately upon fetch, before Arrow export.
-2. **Storage**: In a global, thread-safe `ACK_RESERVOIR`.
-3. **Commit**: Spark Driver sends "Commit Signals" which trigger the native layer to flush and acknowledge the matching message IDs.
+Pub/Sub uses **Ack IDs** instead of offsets.
+- When messages arrive in Rust, their IDs are stored in a native `ACK_RESERVOIR`.
+- These IDs stay off-heap, so the JVM never sees them.
+- When Spark commits a micro-batch, it sends a signal to Rust to "Ack all these messages at once."
 
-### 4.3. Native Schema Projection
-The connector supports structured parsing of JSON/Avro payloads within Rust. This reduces JVM overhead by offloading deserialization to the native layer, delivering pre-parsed columnar data directly to Spark.
+### 4.3. Native Schema Projection (`builder.rs`)
+If you define a schema in Spark (`df.readStream.schema(...)`), the native layer will:
+1.  Parse JSON or Avro bytes directly in Rust.
+2.  Project only the requested columns.
+3.  Fill the Arrow arrays immediately.
+*This means the JVM never even sees the raw JSON bytes.*
 
 ---
 
-## 5. Stability & Resilience Patterns
+## 5. Memory Safety
 
-### 5.1. JNI Panic Barriers
-All JNI entry points are protected by `std::panic::catch_unwind`. This prevents Rust panics from crashing the JVM, returning a specific error code (-100) that can be handled gracefully by the Spark task.
+Interfacing two languages is dangerous (null pointers, double-frees). We use **FFI Protection Barriers**:
+- **Panic Protection**: Every C-level call is wrapped in a "catch_unwind" barrier. If Rust crashes, it throws a standard Java Exception instead of killing the whole Spark node.
+- **Explicit Ownership**: We use the official `arrow-rs` FFI abstractions. The native memory is only freed after Spark calls the `release` callback provided by Arrow.
 
-### 5.2. Backpressure-Aware Ingestion
-The native read loop uses a `tokio::select!` pattern to prioritize processing acknowledgments and control signals over ingesting new data if the internal buffer to Spark is full.
+---
 
-### 5.3. Smart Flush Strategy (Sink)
-The write path triggers flushes based on three thresholds: **Row Count**, **Byte Size** (default 5MB), and **Linger Time** (default 1s). This ensures optimal batch sizing regardless of data velocity or message width.
+## 6. Consistency Model
 
-### 5.4. Fail-Fast Resource Validation
-`NativeReader` and `NativeWriter` perform synchronous gRPC checks (e.g., `get_subscription`) during initialization. This ensures that configuration or permission errors surface immediately rather than hanging in background retries.
+We implement **At-Least-Once** semantics:
+- Messages are only acknowledged to Pub/Sub *after* the Spark Driver confirms the micro-batch has been committed to the checkpoint.
+- If an Executor crashes, the native reader dies, and Pub/Sub will automatically redeliver the unacknowledged messages to a different Executor.

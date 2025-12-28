@@ -20,7 +20,7 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
       import spark.implicits._
 
       val projectId = "spark-test-project"
-      val subscriptionId = "test-sub-1"
+      val subscriptionId = "test-sub"
 
       // We need to make sure the Native library is loaded.
       // NativeReader.load() is called in partition reader, but good to ensure here if needed?
@@ -83,7 +83,7 @@ class EmulatorIntegrationTest extends AnyFunSuite with Matchers {
     try {
       import spark.implicits._
       val projectId = "spark-test-project"
-      val subscriptionId = "test-sub-2"
+      val subscriptionId = "parity-sub"
 
       val df = spark.readStream
         .format("com.google.cloud.spark.pubsub.PubSubTableProvider")

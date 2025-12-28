@@ -24,7 +24,7 @@ class NegativeReaderTest extends AnyFunSuite {
     NativeReader.load()
     val reader = new NativeReader()
     // Pass 0 as pointer
-    val res = reader.getNextBatch(0, "batch-1", 0, 0)
+    val res = reader.getNextBatch(0, "batch-1", 0, 0, 10, 1000L)
     // Should return error code (e.g. -1 for invalid pointer)
     assert(res < 0, "Should return negative error code for invalid pointer")
   }

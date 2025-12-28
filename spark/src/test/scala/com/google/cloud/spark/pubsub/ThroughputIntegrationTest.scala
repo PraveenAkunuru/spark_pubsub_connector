@@ -58,7 +58,6 @@ class ThroughputIntegrationTest extends AnyFunSuite {
       // We don't know payload size in Spark exactly without guessing, but we can just report Msg/sec
       // MB/s calculation in previous test assumed 1KB. We can make it generic or just remove it.
       // Or we can pass payload size too.
-      val payloadSize = sys.props.getOrElse("pubsub.payload.size", "1024").toInt
       val mbPerSec = (count * payloadSize.toDouble) / (1024.0 * 1024.0) / durationSec
       
       println("======================================================")
