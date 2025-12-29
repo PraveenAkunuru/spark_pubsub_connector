@@ -1,4 +1,4 @@
-package com.google.cloud.spark.pubsub
+package finalconnector
 
 import org.apache.spark.sql.SparkSession
 import org.scalatest.funsuite.AnyFunSuite
@@ -27,10 +27,9 @@ class ThroughputIntegrationTest extends AnyFunSuite {
 
     try {
       val df = spark.readStream
-        .format("pubsub-native")
+        .format("pubsub-native-v2")
         .option("projectId", projectId)
         .option("subscriptionId", subscriptionId)
-        .option("numPartitions", "10")
         .load()
 
       val query = df.writeStream

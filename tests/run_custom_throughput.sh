@@ -30,7 +30,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Ensure no conflict
-cleanup
+docker rm -f custom_emulator >/dev/null 2>&1 || true
 
 docker run -d --name custom_emulator -p 8088:8085 gcr.io/google.com/cloudsdktool/cloud-sdk:latest \
     gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=${PROJECT_ID}
@@ -39,11 +39,21 @@ echo "Waiting for emulator..."
 sleep 10
 export PUBSUB_EMULATOR_HOST=127.0.0.1:8088
 
-# Create resources
-curl -s -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"
-curl -s -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
+# Create resources with retry
+echo "Creating resources..."
+set +e
+for i in {1..5}; do
+  if curl -s -f -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/topics/${TOPIC_ID}"; then
+    echo "Topic Created."
+    break
+  fi
+  echo "Retrying topic creation... ($i/5)"
+  sleep 2
+done
+curl -s -f -X PUT "http://127.0.0.1:8088/v1/projects/${PROJECT_ID}/subscriptions/${SUB_ID}" \
   -H "Content-Type: application/json" \
   -d "{\"topic\": \"projects/${PROJECT_ID}/topics/${TOPIC_ID}\"}"
+set -e
 
 echo "Publishing ${MSG_COUNT} messages..."
 
@@ -52,7 +62,9 @@ DATA=$(printf 'a%.0s' $(seq 1 ${PAYLOAD_SIZE_BYTES}) | base64 -w 0)
 
 # Dynamic Batch Size to respect Pub/Sub 10MB limit
 # Target ~5MB per batch to be safe
-if [ "$PAYLOAD_SIZE_BYTES" -gt 50000 ]; then
+if [ "$PAYLOAD_SIZE_BYTES" -le 1024 ]; then
+  BATCH_SIZE=1000
+elif [ "$PAYLOAD_SIZE_BYTES" -gt 50000 ]; then
   BATCH_SIZE=$((5000000 / PAYLOAD_SIZE_BYTES))
   if [ "$BATCH_SIZE" -lt 1 ]; then BATCH_SIZE=1; fi
 else
@@ -101,12 +113,13 @@ export PUBSUB_PROJECT_ID="${PROJECT_ID}"
 export PUBSUB_SUBSCRIPTION_ID="${SUB_ID}"
 export PUBSUB_MSG_COUNT="${MSG_COUNT}"
 export PUBSUB_PAYLOAD_SIZE="${PAYLOAD_SIZE_BYTES}"
-export TEST_MASTER="${TEST_MASTER:-local[4]}"
+export TEST_MASTER="${TEST_MASTER:-local-cluster[8,2,2048]}"
+
+echo "Running Spark Test with Master: $TEST_MASTER..."
 
 # Run in background to allow trap to kill it
-# Note: sbt might need javaOptions to pass -D, but Env vars work reliably.
-$JAVA_HOME/bin/java $JPMS_FLAGS -Xmx2g \
+$JAVA_HOME/bin/java $JPMS_FLAGS -Xmx4g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -jar sbt-launch.jar "spark35/testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest" &
+    -jar sbt-launch.jar "testOnly com.google.cloud.spark.pubsub.ThroughputIntegrationTest" &
 TEST_PID=$!
 wait $TEST_PID

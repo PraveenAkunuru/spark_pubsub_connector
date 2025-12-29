@@ -24,6 +24,40 @@ use crate::source::ACK_HANDLE_MAP;
 /// This allows JNI calls to reference persistent client state across micro-batches.
 pub static CLIENT_REGISTRY: Lazy<DashMap<i32, Arc<PubSubClient>>> = Lazy::new(DashMap::new);
 
+static DEADLINE_MANAGER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Starts the global Deadline Manager if not already running.
+fn ensure_deadline_manager() {
+    if !DEADLINE_MANAGER_STARTED.swap(true, Ordering::Relaxed) {
+        log::info!("Rust: Starting Global Deadline Manager");
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            loop {
+                interval.tick().await;
+                // Extend deadlines for all held messages
+                let mut extension_futures = Vec::new();
+                
+                // We iterate and collect futures to avoid holding the map lock too long (though DashMap is concurrent)
+                // Actually DashMap iter doesn't lock the whole map, but we should be careful.
+                for entry in ACK_HANDLE_MAP.iter() {
+                    let msg = entry.value().clone();
+                    // Extend by 30 seconds
+                    extension_futures.push(async move {
+                        if let Err(e) = msg.modify_ack_deadline(30).await {
+                             log::warn!("Rust: Failed to extend deadline for msg: {:?}", e);
+                        }
+                    });
+                }
+                
+                if !extension_futures.is_empty() {
+                    log::debug!("Rust: Extending deadline for {} messages", extension_futures.len());
+                    futures::future::join_all(extension_futures).await;
+                }
+            }
+        });
+    }
+}
+
 /// A wrapper around the Pub/Sub subscriber client providing buffering and batching.
 pub struct PubSubClient {
     /// Internal receiver for messages pulled from the Pub/Sub service.
@@ -42,6 +76,8 @@ impl PubSubClient {
         subscription_id: &str,
         _ca_path: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        ensure_deadline_manager();
+
         log::info!(
             "Rust: [First Principles] Initializing PubSubClient for {}/{}",
             project_id,
@@ -113,7 +149,7 @@ impl PubSubClient {
                 };
 
                 // Track handle in global map (via source module)
-                ACK_HANDLE_MAP.insert(ack_id.clone(), msg);
+                ACK_HANDLE_MAP.insert(ack_id.clone(), std::sync::Arc::new(msg));
 
                 if tx.send(low_level).await.is_err() {
                     log::info!(

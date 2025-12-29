@@ -195,10 +195,7 @@ mod source_jni {
                     let unacked = crate::source::ACK_HANDLE_MAP.len();
                     // Increased limit to 1,000,000 to accommodate 12-24 partitions (which can pull 20k each)
                     // without hitting a deadlock before the first commit.
-                    if unacked >= 1_000_000 {
-                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
-                         return 0; 
-                    }
+
                     if unacked >= 1_000_000 {
                          log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
                          return 0; 
@@ -209,12 +206,7 @@ mod source_jni {
 
                 let start_time = std::time::Instant::now();
 
-                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
-                    Ok(msgs) => msgs,
-                    Err(e) => {
-                        log::error!("Rust: fetch_batch failed: {:?}", e);
-                        return -2;
-                    }
+
                 let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
                     Ok(msgs) => {
                         if !msgs.is_empty() {

@@ -7,12 +7,13 @@
 use dashmap::DashMap;
 use google_cloud_pubsub::subscriber::ReceivedMessage as HighLevelMessage;
 use once_cell::sync::Lazy;
+use std::sync::Arc;
 
 /// Global map holding high-level message handles.
 /// Handles MUST be held in memory for the duration of the lease to prevent automatic
 /// redelivery by the Pub/Sub service before Spark acknowledges the batch.
 /// Key: Message AckId, Value: ReceivedMessage handle.
-pub static ACK_HANDLE_MAP: Lazy<DashMap<String, HighLevelMessage>> = Lazy::new(DashMap::new);
+pub static ACK_HANDLE_MAP: Lazy<DashMap<String, Arc<HighLevelMessage>>> = Lazy::new(DashMap::new);
 
 /// Map tracking which messages belong to a specific Spark batch.
 /// This allows the connector to perform bulk acknowledgments when Spark commits the micro-batch.

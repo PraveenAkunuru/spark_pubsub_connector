@@ -10,8 +10,8 @@ The connector's performance is driven by three main settings. You can tune these
 
 ### 1.1. Parallelism (`parallelism`)
 *   **What it is**: The number of parallel Spark tasks (and native gRPC streams) created for each micro-batch.
-*   **Recommendation**: Set this to **3x the number of available Spark executor cores**. This ensures high CPU utilization and masks I/O latency.
-*   **Example**: `.option("parallelism", "120")`
+*   **Recommendation**: Set this to **1-2x the number of available Spark executor cores**. High parallelism beyond this can hit emulator or API quota limits (e.g. 8 MB/s threshold).
+*   **Example**: `.option("numPartitions", "16")` for an 8-core cluster.
 
 ### 1.2. Batch Size (`batchSize`)
 *   **What it is**: The number of messages the native layer tries to aggregate into a single Arrow batch before passing it to Spark.

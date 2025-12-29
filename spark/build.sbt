@@ -11,7 +11,8 @@ libraryDependencies ++= Seq(
   "org.apache.arrow" % "arrow-c-data" % "15.0.2",
   "com.google.cloud" % "google-cloud-pubsub" % "1.127.1",
   "com.google.cloud" % "google-cloud-core" % "2.33.0",
-  "com.google.auth" % "google-auth-library-oauth2-http" % "1.23.0"
+  "com.google.auth" % "google-auth-library-oauth2-http" % "1.23.0",
+  "org.scalatest" %% "scalatest" % "3.2.17" % Test
 )
 
 dependencyOverrides ++= Seq(

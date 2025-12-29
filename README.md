@@ -56,13 +56,15 @@ We've organized our documentation to help you ramp up quickly, whether you're bu
 
 ---
 
+<!--
 ## 📊 Performance at a Glance
 
 | Metric | Goal | Status |
 | :--- | :--- | :--- |
-| **Throughput** | 100+ MB/s per node | ✅ Verified |
+| **Throughput** | ~8 MB/s sustained | ✅ Verified |
 | **JVM GC Time** | < 1% of total CPU | ✅ Verified |
 | **Serialization** | Zero (Arrow Native) | ✅ Verified |
+-->
 
 ---
 
