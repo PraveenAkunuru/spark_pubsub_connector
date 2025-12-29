@@ -1,4 +1,4 @@
-package com.google.cloud.spark.pubsub.source
+package finalconnector
 
 import org.apache.spark.sql.connector.read.PartitionReader
 import org.apache.spark.sql.types.StructType
@@ -7,11 +7,16 @@ import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.c.{ArrowArray, ArrowSchema, Data}
 import scala.collection.JavaConverters._
-import com.google.cloud.spark.pubsub.core.PubSubConfig
-import com.google.cloud.spark.pubsub.diagnostics.PubSubTaskMetric
 
 /**
- * Base class for Pub/Sub partition readers, handling common JNI lifecycle and memory management.
+ * Base class for Pub/Sub partition readers, managing the native lifecycle 
+ * and zero-copy Arrow memory management.
+ * 
+ * ## Resource Management
+ * This class uses an `org.apache.arrow.memory.RootAllocator` to manage off-heap 
+ * memory for Arrow FFI transfers. It registers a `TaskCompletionListener` with 
+ * Spark's `TaskContext` to ensure the native reader and allocator are closed 
+ * even if the Spark task fails.
  */
 abstract class PubSubPartitionReaderBase[T](
     partition: PubSubInputPartition, 

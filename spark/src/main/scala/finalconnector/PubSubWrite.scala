@@ -1,13 +1,10 @@
-package com.google.cloud.spark.pubsub.sink
+package finalconnector
 
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.sql.catalyst.InternalRow
 import scala.collection.JavaConverters._
-import com.google.cloud.spark.pubsub.core.PubSubConfig
-import com.google.cloud.spark.pubsub.schema.ArrowUtils
-import com.google.cloud.spark.pubsub.diagnostics._
 
 /**
  * Builder for creating a `PubSubWrite` operation.
@@ -115,7 +112,7 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   
   // Current active root for buffering
   private var root = org.apache.arrow.vector.VectorSchemaRoot.create(ArrowUtils.toArrowSchema(schema), allocator)
-  private var vectors = schema.fields.map(f => root.getVector(f.name))
+  private var vectors: Array[org.apache.arrow.vector.FieldVector] = schema.fields.map(f => root.getVector(f.name))
   private var rowCount = 0
   private var currentBatchBytes = 0L
   private var lastFlushTime = System.currentTimeMillis()

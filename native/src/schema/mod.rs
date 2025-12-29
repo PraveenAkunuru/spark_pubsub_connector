@@ -9,9 +9,6 @@
 pub mod builder;
 pub mod reader;
 
-pub use builder::ArrowBatchBuilder;
-pub use reader::ArrowBatchReader;
-
 use arrow::datatypes::{DataType, Field, Schema};
 use std::sync::Arc;
 // use crate::arrow_convert::builder::ArrowBatchBuilder; // Removed duplicate

@@ -1,4 +1,4 @@
-package com.google.cloud.spark.pubsub.source
+package finalconnector
 
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.sql.connector.read.streaming.{MicroBatchStream, Offset}
@@ -9,17 +9,23 @@ import org.apache.spark.sql.vectorized.{ColumnarBatch, ArrowColumnVector}
 import scala.collection.JavaConverters._
 
 import org.apache.spark.sql.SparkSession
-import com.google.cloud.spark.pubsub.core.PubSubConfig
-import com.google.cloud.spark.pubsub.diagnostics._
 
 /**
- * Orchestrates the Micro-Batch stream for Pub/Sub.
+ * Orchestrates the Micro-Batch stream for Google Cloud Pub/Sub.
  *
- * This class handles:
- * 1. **Offset Management**: Tracking logical progress of the stream.
- * 2. **Partition Planning**: Splitting the workload into parallel tasks (partitions).
- * 3. **Reader Factory**: Creating executors-side readers.
- * 4. **Driver-Coordinated Acks**: Aggregating ack_ids from across the cluster and flushing on commit.
+ * ## Architecture
+ * Unlike Pulsar or Kafka, Pub/Sub does not have user-accessible partitions. This 
+ * stream implements "Intelligent Partitioning" by calculating the optimal number
+ * of Spark parallel tasks based on:
+ * 1. **Cluster Capacity**: Total available cores in the Spark session.
+ * 2. **Throughput Goals**: Expected MB/s specified in configuration.
+ * 3. **Highly Composite Numbers (HCNs)**: Scaling factors that divide evenly to
+ *    prevent data skew in down-stream joins.
+ *
+ * ## Acknowledgment Propagation
+ * Offsets in this stream are logical sequence numbers. Actual message 
+ * acknowledgments (ACKs) are tracked by individual partition readers and then
+ * committed back to Pub/Sub once Spark successfully completes the micro-batch.
  */
 class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], checkpointLocation: String) 
   extends MicroBatchStream with org.apache.spark.internal.Logging {
@@ -198,7 +204,6 @@ class PubSubPartitionReaderFactory(schema: StructType) extends PartitionReaderFa
 class PubSubPartitionReader(partition: PubSubInputPartition, schema: StructType) 
   extends PubSubPartitionReaderBase[InternalRow](partition, schema) {
   
-  import com.google.cloud.spark.pubsub.schema.ArrowUtils
   
   private var currentBatch: java.util.Iterator[InternalRow] = java.util.Collections.emptyIterator()
   private var currentVectorSchemaRoot: org.apache.arrow.vector.VectorSchemaRoot = _
@@ -277,7 +282,12 @@ class PubSubColumnarPartitionReader(partition: PubSubInputPartition, schema: Str
       case Some(root) =>
         currentVectorSchemaRoot = root
         val columnarVectors = schema.fields.map { field =>
-          new ArrowColumnVector(root.getVector(field.name))
+          val vec = root.getVector(field.name)
+          if (vec != null) {
+            new ArrowColumnVector(vec)
+          } else {
+            throw new RuntimeException(s"Column '${field.name}' not found in Arrow batch. Batch schema: ${root.getSchema}")
+          }
         }
 
         currentBatch = new ColumnarBatch(columnarVectors.toArray, root.getRowCount)

@@ -1,14 +1,23 @@
+//! State management for Pub/Sub message handles and Spark batch acknowledgments.
+//!
+//! This module provides global maps that preserve message leases (via `ACK_HANDLE_MAP`)
+//! and track batch-to-message mapping (`BATCH_ACK_MAP`) to facilitate atomic commits
+//! in the Spark Streaming lifecycle.
+
 use dashmap::DashMap;
 use google_cloud_pubsub::subscriber::ReceivedMessage as HighLevelMessage;
 use once_cell::sync::Lazy;
 
-// Global map to hold high-level message handles (keeps leases alive)
-// Key: AckID, Value: HighLevelMessage
-pub static ACK_HANDLE_MAP: Lazy<DashMap<String, HighLevelMessage>> = Lazy::new(|| DashMap::new());
+/// Global map holding high-level message handles.
+/// Handles MUST be held in memory for the duration of the lease to prevent automatic
+/// redelivery by the Pub/Sub service before Spark acknowledges the batch.
+/// Key: Message AckId, Value: ReceivedMessage handle.
+pub static ACK_HANDLE_MAP: Lazy<DashMap<String, HighLevelMessage>> = Lazy::new(DashMap::new);
 
-// Map to track messages belonging to a Spark Batch (for commit-time acking)
-// Key: BatchID, Value: Vec<AckID>
-pub static BATCH_ACK_MAP: Lazy<DashMap<String, Vec<String>>> = Lazy::new(|| DashMap::new());
+/// Map tracking which messages belong to a specific Spark batch.
+/// This allows the connector to perform bulk acknowledgments when Spark commits the micro-batch.
+/// Key: Partition-Batch Identifier (e.g., "p0-123"), Value: Vector of AckIds.
+pub static BATCH_ACK_MAP: Lazy<DashMap<String, Vec<String>>> = Lazy::new(DashMap::new);
 
 /// Purges all unacked messages and batch state for a partition.
 /// This prevents memory leaks if Spark partitions are abandoned.

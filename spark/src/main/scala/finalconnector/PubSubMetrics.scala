@@ -1,10 +1,14 @@
-package com.google.cloud.spark.pubsub.diagnostics
+package finalconnector
 
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 
 /**
- * Base class for Pub/Sub custom metrics with summation aggregation.
+ * Definitions for custom Spark metrics exported by the Pub/Sub connector.
+ *
+ * This file defines the custom metrics that appear in the Spark UI and 
+ * MetricsSystem. These metrics provide deep visibility into the native 
+ * data plane's memory usage, throughput, and gRPC performance.
  */
 abstract class PubSubCustomMetricBase extends CustomMetric {
   override def aggregateTaskMetrics(taskMetrics: Array[Long]): String = {

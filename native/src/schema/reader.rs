@@ -1,3 +1,17 @@
+//! # Arrow to Pub/Sub Message Reader
+//!
+//! This module implements the transformation of columnar Arrow `StructArray`s
+//! back into `PubsubMessage` objects for publishing to Google Cloud Pub/Sub.
+//!
+//! ## Operational Modes
+//!
+//! 1. **Raw Mode**: If the Arrow array contains a `payload` column of type `Binary`,
+//!    this column is used directly as the message data. Other columns (excluding
+//!    metadata like `message_id`) are mapped to Pub/Sub attributes.
+//!
+//! 2. **Structured Mode**: If no `payload` column is present, the entire row
+//!    is serialized into a line-delimited JSON string and used as the message data.
+
 use arrow::array::{Array, BinaryArray, StructArray};
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -5,22 +19,22 @@ use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Reader for converting Arrow `StructArray`s back into `PubsubMessage` objects for publishing.
-/// It dynamically maps Arrow columns to Pub/Sub message fields and attributes.
+/// Reader for converting Arrow `StructArray`s back into `PubsubMessage` objects.
 pub struct ArrowBatchReader<'a> {
+    /// The underlying Arrow StructArray containing the batch data.
     array: &'a StructArray,
 }
 
 impl<'a> ArrowBatchReader<'a> {
+    /// Creates a new ArrowBatchReader for the given StructArray.
     pub fn new(array: &'a StructArray) -> Self {
         Self { array }
     }
 
     /// Converts the entire Arrow batch into a vector of `PubsubMessage`s.
-    /// - If 'payload' column exists: Uses strict mode (payload=data, others=attributes).
-    /// - If 'payload' missing: Serializes row to JSON (excluding 'ordering_key').
     ///
-    /// TODO: Support serialization to Avro or Protobuf payloads.
+    /// This method automatically detects the operational mode based on the 
+    /// presence of a 'payload' column.
     pub fn to_pubsub_messages(&self) -> Result<Vec<PubsubMessage>, Box<dyn std::error::Error>> {
         let num_rows = self.array.len();
         if num_rows == 0 {
@@ -29,21 +43,21 @@ impl<'a> ArrowBatchReader<'a> {
 
         let payload_col = self.array.column_by_name("payload");
 
-        if let Some(payload_col) = payload_col {
+        if let Some(col) = payload_col {
             // === RAW MODE ===
-            let payload_binary = payload_col
+            let payload_binary = col
                 .as_any()
                 .downcast_ref::<BinaryArray>()
                 .ok_or_else(|| {
                     format!(
                         "'payload' column must be Binary, found {:?}",
-                        payload_col.data_type()
+                        col.data_type()
                     )
                 })?;
 
             let ordering_key_col = self.array.column_by_name("ordering_key");
 
-            // Identify attribute columns (all others except core ones)
+            // Identify attribute columns (all others except core/metadata ones)
             let core_fields = ["payload", "message_id", "publish_time", "ordering_key"];
             let mut attr_indices = Vec::new();
             for (idx, field) in self.array.fields().iter().enumerate() {
@@ -90,8 +104,8 @@ impl<'a> ArrowBatchReader<'a> {
             }
             Ok(messages)
         } else {
-            // === STRUCTURED MODE (Optimized) ===
-            // Identify metadata columns to exclude from data payload
+            // === STRUCTURED MODE ===
+            // Identify metadata columns to exclude from the data payload
             let reserved_fields = ["message_id", "publish_time", "ack_id", "ordering_key", "attributes"];
             let mut data_indices = Vec::new();
             let mut data_fields = Vec::new();
@@ -103,7 +117,7 @@ impl<'a> ArrowBatchReader<'a> {
                 }
             }
 
-            // Project batch to data-only columns
+            // Project the batch to data-only columns for JSON serialization
             let data_columns: Vec<arrow::array::ArrayRef> = data_indices.iter().map(|&i| self.array.column(i).clone()).collect();
             let data_schema = Arc::new(Schema::new(data_fields));
             let data_batch = RecordBatch::try_new(data_schema, data_columns)?;
@@ -118,15 +132,11 @@ impl<'a> ArrowBatchReader<'a> {
             let ordering_key_col = self.array.column_by_name("ordering_key");
             
             let mut messages = Vec::with_capacity(num_rows);
-            // Splitting is safe as each row is a line
             let mut lines = json_buf.split(|&b| b == b'\n');
 
             for i in 0..num_rows {
                 let data = lines.next().unwrap_or(&[]).to_vec();
-                if data.is_empty() && i < num_rows {
-                    // Possible trailing newline or empty row
-                }
-
+                
                 let ordering_key = if let Some(col) = ordering_key_col {
                     if !col.is_null(i) {
                         arrow::util::display::array_value_to_string(col, i).unwrap_or_default()

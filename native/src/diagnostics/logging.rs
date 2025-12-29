@@ -6,23 +6,25 @@
 //! It uses a background thread and a multi-producer single-consumer (MPSC) channel
 //! to decouple Rust execution from JNI/JVM latency.
 
-// 
 use log::{Level, Log, Metadata, Record};
 use std::sync::{Once, OnceLock};
 use std::thread;
 use std::sync::mpsc::SyncSender;
-
-// 
 use std::cell::RefCell;
 
+/// Global sender for the logging channel.
 static SENDER: OnceLock<SyncSender<(Level, String)>> = OnceLock::new();
+
+/// Counter for logs dropped due to channel congestion.
 static DROPPED_LOGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 thread_local! {
+    /// Thread-local storage for logging context (e.g., partition ID).
     static LOG_CONTEXT: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-/// Sets the current thread's logging context (e.g., "[Partition: 0, Batch: 1]").
+/// Sets the current thread's logging context.
+/// This context is prefixed to every log message generated on this thread.
 pub fn set_context(context: &str) {
     LOG_CONTEXT.with(|c| {
         *c.borrow_mut() = context.to_string();
@@ -34,7 +36,8 @@ struct JniLogger;
 
 impl Log for JniLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
-        true // we filter via set_max_level
+        // Filtering is handled via log::set_max_level during initialization.
+        true
     }
 
     fn log(&self, record: &Record) {
@@ -46,7 +49,7 @@ impl Log for JniLogger {
                 } else {
                     format!("{} {}", context, record.args())
                 };
-                // Use try_send to avoid blocking if the channel is full
+                // Use try_send to avoid blocking native data plane threads if JVM logging stalls.
                 if tx.try_send((record.level(), msg)).is_err() {
                     DROPPED_LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -57,11 +60,14 @@ impl Log for JniLogger {
     fn flush(&self) {}
 }
 
-const LOGGER_CLASS: &str = "com/google/cloud/spark/pubsub/diagnostics/NativeLogger$";
-const LOGGER_SIG: &str = "Lcom/google/cloud/spark/pubsub/diagnostics/NativeLogger$;";
+const LOGGER_CLASS: &str = "finalconnector/NativeLogger$";
+const LOGGER_SIG: &str = "Lfinalconnector/NativeLogger$;";
 
-/// Initialize the JNI Logger.
-/// Spawns a background thread that attaches to the JVM and calls `NativeLogger.log()`.
+/// Initializes the JNI Logger.
+///
+/// This function is idempotent and should be called once per executor process
+/// or from every JNI entry point to ensure logs are captured.
+/// It spawns a background thread that maintains a permanent JNI attachment to the JVM.
 pub fn init(env: &jni::JNIEnv) {
     static START: Once = Once::new();
     START.call_once(|| {
@@ -72,7 +78,7 @@ pub fn init(env: &jni::JNIEnv) {
 }
 
 fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
-    // Increased buffer size to 20k to handle high-throughput bursts
+    // 20,000 message buffer provides ~20MB of log burst protection.
     let (tx, rx) = std::sync::mpsc::sync_channel::<(Level, String)>(20000);
 
     let (level_filter, is_debug) = match std::env::var("RUST_LOG").ok().as_deref() {
@@ -84,10 +90,7 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
         _ => (log::LevelFilter::Info, false),
     };
 
-    // Note: We MUST set the logger before we might start using it.
-    // However, set_logger can only be called ONCE per process.
     if let Err(e) = log::set_logger(&JniLogger) {
-         // If already set, we just continue (unlikely in this architecture but safe)
          eprintln!("Rust Logging: Logger already set: {:?}", e);
     }
     log::set_max_level(level_filter);
@@ -96,14 +99,11 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
         return Err("SENDER already initialized".into());
     }
 
-    // Capture JavaVM to attach background thread
     let vm = env.get_java_vm()?;
-
-    // Find the logger class and create a GlobalRef.
     let logger_class = env.find_class(LOGGER_CLASS)?;
     let logger_class_global = env.new_global_ref(logger_class)?;
 
-    // Get the singleton MODULE$ field
+    // Retrieve the Scala singleton MODULE$ instance.
     let module_field = env.get_static_field_id(LOGGER_CLASS, "MODULE$", LOGGER_SIG)?;
     let jval = env.get_static_field_unchecked(LOGGER_CLASS, module_field, jni::signature::JavaType::Object(LOGGER_SIG.to_string()))?;
     
@@ -118,9 +118,7 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
 
     let logger_obj_global = env.new_global_ref(logger_obj)?;
 
-    // Spawn background thread to drain logs to JNI
     thread::spawn(move || {
-        // Attach this thread to the JVM
         let env = match vm.attach_current_thread_permanently() {
             Ok(env) => env,
             Err(e) => {
@@ -129,6 +127,7 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+        // Scala NativeLogger.log(level: Int, msg: String)
         let log_method = match env.get_method_id(&logger_class_global, "log", "(ILjava/lang/String;)V") {
             Ok(m) => m,
             Err(e) => {
@@ -137,7 +136,6 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Keep track of JNI failures
         let mut failure_count = 0;
 
         while let Ok((level, msg)) = rx.recv() {
@@ -172,16 +170,15 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = env.exception_clear();
                 }
 
-                // In debug mode, fallback to console if JNI fails
                 if is_debug {
                     eprintln!("[NATIVE-{:?}] {}", level, msg);
                 }
             } else {
-                failure_count = 0; // Reset on success
+                failure_count = 0;
             }
         }
     });
 
-    eprintln!("Rust: JNI Logging initialized via GlobalRef.");
+    eprintln!("Rust: JNI Logging bridge active.");
     Ok(())
 }

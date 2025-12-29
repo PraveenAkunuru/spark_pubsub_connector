@@ -1,8 +1,22 @@
+//! # Pub/Sub to Arrow Batch Builder
+//!
+//! This module implements the conversion of stream-oriented `ReceivedMessage`
+//! objects into columnar Apache Arrow `RecordBatch` structures.
+//!
+//! ## Operational Modes
+//!
+//! 1. **Raw Mode**: The message payload is stored as a single `Binary` column.
+//!    This is the default if no schema is provided and minimizes CPU overhead.
+//!
+//! 2. **Structured Mode**: Payloads (JSON or Avro) are parsed and projected into
+//!    a user-defined Arrow schema. Fields missing in the payload but present in
+//!    Pub/Sub attributes are automatically backfilled.
+
 use arrow::array::{
     ArrayRef, BinaryBuilder, BooleanBuilder, Float64Builder, Int32Builder,
-    Int64Builder, MapBuilder, StringBuilder, TimestampMicrosecondBuilder,
+    Int64Builder, MapBuilder, MapFieldNames, StringBuilder, TimestampMicrosecondBuilder,
 };
-use arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
 use serde_json::Value;
 use std::sync::Arc;
@@ -19,6 +33,7 @@ pub enum TypedBuilder {
 }
 
 impl TypedBuilder {
+    /// Creates a new TypedBuilder for the specified DataType.
     pub fn new(dtype: &DataType, capacity: usize) -> Self {
         match dtype {
             DataType::Utf8 => TypedBuilder::Utf8(StringBuilder::with_capacity(capacity, capacity * 32)),
@@ -26,10 +41,11 @@ impl TypedBuilder {
             DataType::Int64 => TypedBuilder::Int64(Int64Builder::with_capacity(capacity)),
             DataType::Float64 => TypedBuilder::Float64(Float64Builder::with_capacity(capacity)),
             DataType::Boolean => TypedBuilder::Boolean(BooleanBuilder::with_capacity(capacity)),
-            _ => TypedBuilder::Utf8(StringBuilder::with_capacity(capacity, capacity * 8)), // Default fallback
+            _ => TypedBuilder::Utf8(StringBuilder::with_capacity(capacity, capacity * 8)),
         }
     }
 
+    /// Appends a null value to the underlying builder.
     pub fn append_null(&mut self) {
         match self {
             TypedBuilder::Utf8(b) => b.append_null(),
@@ -40,6 +56,7 @@ impl TypedBuilder {
         }
     }
 
+    /// Finalizes the builder and returns an ArrayRef.
     pub fn finish(&mut self) -> ArrayRef {
         match self {
             TypedBuilder::Utf8(b) => Arc::new(b.finish()),
@@ -51,36 +68,45 @@ impl TypedBuilder {
     }
 }
 
-/// Builder for converting a stream of `ReceivedMessage` objects into an Arrow batch.
-/// Each field (message_id, publish_time, payload, ack_id, attributes) is managed by its own columnar builder.
+/// Orchestrates the construction of an Arrow batch from Pub/Sub messages.
 pub struct ArrowBatchBuilder {
-    // Metadata Fields
+    // Standard Pub/Sub Metadata columns
     message_ids: StringBuilder,
     publish_times: TimestampMicrosecondBuilder,
     ack_ids: StringBuilder,
     attributes: MapBuilder<StringBuilder, StringBuilder>,
 
-    // Data Fields
+    // Data-plane configuration
     is_raw: bool,
-    payloads: Option<BinaryBuilder>, // Used if is_raw = true
-    struct_builders: Option<Vec<TypedBuilder>>, // Used if is_raw = false (Schema projection)
-    struct_fields: Vec<Field>,                  // Corresponds to struct_builders
+    payloads: Option<BinaryBuilder>,
+    struct_builders: Option<Vec<TypedBuilder>>,
+    struct_fields: Vec<Field>,
     
-    // Configuration
     format: DataFormat,
     avro_schema: Option<apache_avro::Schema>,
 }
 
 impl ArrowBatchBuilder {
-    /// Creates a new builder. If schema is None, defaults to "Raw Mode" (payload as Binary).
-    /// If schema is provided, attempts to project JSON/Avro payloads into that schema.
+    /// Creates a new ArrowBatchBuilder.
+    ///
+    /// # Arguments
+    /// * `schema` - Optional Arrow schema for structured projection.
+    /// * `format` - Message payload format (JSON or Avro).
+    /// * `avro_schema` - Optional Avro schema if format is Avro.
     pub fn new(
         schema: Option<SchemaRef>, 
         format: DataFormat,
         avro_schema: Option<apache_avro::Schema>
     ) -> Self {
+        // Spark expects singular "key"/"value" names for Map entries to avoid schema mismatch.
+        let map_names = MapFieldNames {
+            entry: "entries".to_string(),
+            key: "key".to_string(),
+            value: "value".to_string(),
+        };
+
         if let Some(s) = schema {
-            // Structured Mode
+            // Structured Mode: Exclude metadata fields from the payload struct
             let allowed_fields: Vec<Field> = s
                 .fields()
                 .iter()
@@ -102,7 +128,7 @@ impl ArrowBatchBuilder {
                 message_ids: StringBuilder::new(),
                 publish_times: TimestampMicrosecondBuilder::new(),
                 ack_ids: StringBuilder::new(),
-                attributes: MapBuilder::new(None, StringBuilder::new(), StringBuilder::new()),
+                attributes: MapBuilder::new(Some(map_names), StringBuilder::new(), StringBuilder::new()),
                 is_raw: false,
                 payloads: if has_payload { Some(BinaryBuilder::new()) } else { None },
                 struct_builders: Some(builders),
@@ -111,23 +137,23 @@ impl ArrowBatchBuilder {
                 avro_schema,
             }
         } else {
-            // Raw Mode
+            // Raw Mode: Just metadata and the raw byte payload
             Self {
                 message_ids: StringBuilder::new(),
                 publish_times: TimestampMicrosecondBuilder::new(),
                 ack_ids: StringBuilder::new(),
-                attributes: MapBuilder::new(None, StringBuilder::new(), StringBuilder::new()),
+                attributes: MapBuilder::new(Some(map_names), StringBuilder::new(), StringBuilder::new()),
                 is_raw: true,
                 payloads: Some(BinaryBuilder::new()),
                 struct_builders: None,
                 struct_fields: Vec::new(),
-                format: DataFormat::Json, // Raw mode implies binary payload, but format tracked
+                format: DataFormat::Json,
                 avro_schema: None,
             }
         }
     }
 
-    /// Appends a single `ReceivedMessage` (including its data and metadata) to the columnar builders.
+    /// Appends a single Pub/Sub message to the batch.
     pub fn append(&mut self, recv_msg: &ReceivedMessage) {
         let msg = recv_msg
             .message
@@ -142,22 +168,19 @@ impl ArrowBatchBuilder {
         };
         self.publish_times.append_value(timestamp_micros);
         self.ack_ids.append_value(&recv_msg.ack_id);
-
-        // Attributes
+        
+        // Append Attributes Map
         for (k, v) in &msg.attributes {
             self.attributes.keys().append_value(k);
             self.attributes.values().append_value(v);
         }
-        self.attributes
-            .append(true)
-            .expect("Failed to append attributes map");
+        self.attributes.append(true).expect("Failed to append attributes map");
 
         if let Some(p) = self.payloads.as_mut() {
             p.append_value(&msg.data);
         }
 
         if !self.is_raw {
-            // Structured Mode
             let builders = self.struct_builders.as_mut().unwrap();
             let fields = &self.struct_fields;
 
@@ -168,7 +191,6 @@ impl ArrowBatchBuilder {
                     Self::append_json_to_row(builders, fields, json_val, &msg.attributes);
                 }
                 DataFormat::Avro => {
-                    // Try parsing Avro
                     match &self.avro_schema {
                         Some(schema) => {
                              let avro_val = apache_avro::from_avro_datum(schema, &mut &msg.data[..], None).ok();
@@ -183,7 +205,7 @@ impl ArrowBatchBuilder {
         }
     }
 
-    /// Appends a row from an Avro record.
+    /// Appends a structured row from an Avro value, with attribute fallback.
     fn append_avro_to_row(
         builders: &mut [TypedBuilder],
         fields: &[Field],
@@ -192,7 +214,6 @@ impl ArrowBatchBuilder {
     ) {
         for (i, field) in fields.iter().enumerate() {
             let field_name = field.name();
-            // Try to find field in Avro record
             let mut found_val: Option<&AvroValue> = None;
 
             if let Some(AvroValue::Record(entries)) = record {
@@ -204,7 +225,6 @@ impl ArrowBatchBuilder {
                 }
             }
 
-            // Use the value from Avro if present and not Null, otherwise fallback to attributes
             match found_val {
                 Some(val) if !matches!(val, AvroValue::Null) => {
                     Self::append_avro_value(&mut builders[i], val);
@@ -220,7 +240,6 @@ impl ArrowBatchBuilder {
         }
     }
 
-    /// Appends a single Avro value to the given builder, performing type-safe conversion.
     fn append_avro_value(
         builder: &mut TypedBuilder,
         value: &AvroValue,
@@ -268,14 +287,13 @@ impl ArrowBatchBuilder {
         }
     }
     
-    /// Appends null values to all provided builders.
     fn append_nulls_for_all(builders: &mut [TypedBuilder]) {
          for b in builders {
              b.append_null();
          }
     }
 
-    /// Appends a row from a JSON value.
+    /// Appends a structured row from a JSON value, with attribute fallback.
     fn append_json_to_row(
         builders: &mut [TypedBuilder],
         fields: &[Field],
@@ -286,7 +304,6 @@ impl ArrowBatchBuilder {
             let field_name = field.name();
             let val = json.and_then(|j| j.get(field_name));
             
-            // Try explicit JSON value first, then fallback to attributes
             match val {
                 Some(v) if !v.is_null() => {
                     Self::append_json_value(&mut builders[i], v);
@@ -302,7 +319,6 @@ impl ArrowBatchBuilder {
         }
     }
     
-    /// Appends an attribute value to a builder, attempting to parse it into the target type.
     fn append_attr_value(
         builder: &mut TypedBuilder,
         value: &str,
@@ -316,7 +332,6 @@ impl ArrowBatchBuilder {
          }
     }
 
-    /// Appends a single JSON value to its corresponding builder.
     fn append_json_value(
         builder: &mut TypedBuilder,
         v: &Value,
@@ -336,38 +351,22 @@ impl ArrowBatchBuilder {
         }
     }
 
-
-    /// Finalizes the builders and returns the Arrow arrays and corresponding schema.
+    /// Finalizes construction and returns columnar arrays along with the aligned schema.
     pub fn finish(&mut self) -> (Vec<ArrayRef>, SchemaRef) {
         let message_id_array = Arc::new(self.message_ids.finish()) as ArrayRef;
         let publish_time_array = Arc::new(self.publish_times.finish()) as ArrayRef;
         let ack_id_array = Arc::new(self.ack_ids.finish()) as ArrayRef;
         let attributes_array = Arc::new(self.attributes.finish()) as ArrayRef;
 
-        // Define metadata fields
         let mut fields = vec![
-            Field::new("message_id", DataType::Utf8, false),
+            Field::new("message_id", DataType::Utf8, true),
             Field::new(
                 "publish_time",
                 DataType::Timestamp(TimeUnit::Microsecond, None),
                 true,
             ),
-            Field::new("ack_id", DataType::Utf8, false),
-            Field::new(
-                "attributes",
-                DataType::Map(
-                    Arc::new(Field::new(
-                        "entries",
-                        DataType::Struct(Fields::from(vec![
-                            Field::new("keys", DataType::Utf8, false),
-                            Field::new("values", DataType::Utf8, true),
-                        ])),
-                        false,
-                    )),
-                    false,
-                ),
-                true,
-            ),
+            Field::new("ack_id", DataType::Utf8, true),
+            Field::new("attributes", attributes_array.data_type().clone(), true),
         ];
 
         let mut arrays = vec![
@@ -401,7 +400,7 @@ impl ArrowBatchBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, BinaryArray};
+    use arrow::array::BinaryArray;
     use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 
     #[test]
@@ -427,7 +426,7 @@ mod tests {
 
         let (arrays, schema) = builder.finish();
 
-        assert_eq!(arrays.len(), 5); // message_id, publish_time, payload, ack_id, attributes
+        assert_eq!(arrays.len(), 5);
         let payload_idx = schema.index_of("payload").unwrap();
         let payload_array = arrays[payload_idx]
             .as_any()
@@ -441,8 +440,6 @@ mod tests {
         use arrow::datatypes::{DataType, Field};
         use std::collections::HashMap;
 
-        // Schema: [name: Utf8, age: Int32, source: Utf8]
-        // "source" will come from attributes
         let fields = vec![
             Field::new("name", DataType::Utf8, true),
             Field::new("age", DataType::Int32, true),
@@ -450,7 +447,7 @@ mod tests {
         ];
         let schema = Arc::new(Schema::new(fields));
 
-        let mut builder = ArrowBatchBuilder::new(Some(schema.clone()), DataFormat::Json, None);
+        let mut builder = ArrowBatchBuilder::new(Some(schema), DataFormat::Json, None);
 
         let mut attr = HashMap::new();
         attr.insert("source".to_string(), "pubsub_attribute".to_string());
@@ -473,8 +470,6 @@ mod tests {
         builder.append(&msg1);
         let (arrays, _) = builder.finish();
 
-        // 0: message_id, 1: publish_time, 2: ack_id, 3: attributes
-        // 4: name, 5: age, 6: source
         let name_arr = arrays[4].as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
         let age_arr = arrays[5].as_any().downcast_ref::<arrow::array::Int32Array>().unwrap();
         let source_arr = arrays[6].as_any().downcast_ref::<arrow::array::StringArray>().unwrap();

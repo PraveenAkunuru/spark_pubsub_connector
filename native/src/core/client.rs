@@ -1,3 +1,8 @@
+//! Pub/Sub client management and asynchronous ingestion.
+//!
+//! This module handles the lifecycle of Google Cloud Pub/Sub subscribers, including
+//! authentication, stream management, and internal buffering for Spark consumption.
+
 use dashmap::DashMap;
 use futures::StreamExt;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
@@ -15,15 +20,23 @@ use tokio::time::{Duration, Instant};
 use crate::core::metrics::{BUFFERED_BYTES, INGESTED_BYTES, INGESTED_MESSAGES, READ_ERRORS};
 use crate::source::ACK_HANDLE_MAP;
 
-pub static CLIENT_REGISTRY: Lazy<DashMap<i32, Arc<PubSubClient>>> = Lazy::new(|| DashMap::new());
+/// Global registry of active Pub/Sub clients, keyed by an integer identifier.
+/// This allows JNI calls to reference persistent client state across micro-batches.
+pub static CLIENT_REGISTRY: Lazy<DashMap<i32, Arc<PubSubClient>>> = Lazy::new(DashMap::new);
 
+/// A wrapper around the Pub/Sub subscriber client providing buffering and batching.
 pub struct PubSubClient {
-    pub subscription_name: String,
+    /// Internal receiver for messages pulled from the Pub/Sub service.
     receiver: AsyncMutex<mpsc::Receiver<LowLevelMessage>>,
-    pub client: Client,
 }
 
 impl PubSubClient {
+    /// Creates a new PubSubClient and starts a background pull task.
+    ///
+    /// # Arguments
+    /// * `project_id` - GCP Project ID.
+    /// * `subscription_id` - Subscription ID or full resource name.
+    /// * `_ca_path` - Optional path to CA certificates (reserved for private environments).
     pub async fn new(
         project_id: &str,
         subscription_id: &str,
@@ -117,12 +130,13 @@ impl PubSubClient {
         });
 
         Ok(PubSubClient {
-            subscription_name: full_sub_name,
             receiver: AsyncMutex::new(rx),
-            client,
         })
     }
 
+    /// Fetches a batch of messages from the internal buffer.
+    ///
+    /// Blocks until `max_messages` are received or `wait_ms` expires.
     pub async fn fetch_batch(
         &self,
         max_messages: usize,
@@ -163,6 +177,10 @@ impl PubSubClient {
         Ok(messages)
     }
 
+    /// Acknowledges a list of messages by their AckIds.
+    ///
+    /// This removes the handles from the global `ACK_HANDLE_MAP` and triggers
+    /// the asynchronous acknowledgment call to the Pub/Sub service.
     pub async fn acknowledge(
         &self,
         ack_ids: Vec<String>,

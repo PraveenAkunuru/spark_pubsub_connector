@@ -1,4 +1,4 @@
-package com.google.cloud.spark.pubsub.core
+package finalconnector
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, Table, TableCapability}
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder}
@@ -8,15 +8,13 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
 import scala.collection.JavaConverters._
-import com.google.cloud.spark.pubsub.source.PubSubMicroBatchStream
-import com.google.cloud.spark.pubsub.sink.PubSubWriteBuilder
-import com.google.cloud.spark.pubsub.diagnostics._
 
 /**
- * Represents a logical Pub/Sub source or sink in Spark.
+ * Represents a logical Pub/Sub source or sink within the Spark Catalyst engine.
  *
- * This class links the Spark schema to the underlying Pub/Sub resource (topic or subscription)
- * and declares the table's capabilities (e.g., Micro-Batch Reading, Streaming Writing).
+ * This class serves as the bridge between Spark's schema representation and 
+ * the underlying Pub/Sub resources. It defines the physical capabilities 
+ * of the connector, such as micro-batch ingestion and streaming publication.
  */
 class PubSubTable(schema: StructType, properties: util.Map[String, String]) 
   extends Table with SupportsRead with SupportsWrite with org.apache.spark.internal.Logging {

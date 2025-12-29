@@ -9,6 +9,11 @@ project/project/
 
 # Rust
 native/target/
+native/target_docker/
+native/target_fix/
+native/target_static/
+native/Cargo.lock
+native/metadata.json
 **/*.rs.bk
 
 # IntelliJ / IDE
@@ -29,13 +34,12 @@ derby.log
 *.o
 *.a
 
-# Temporary files
+# Temporary files and Output
 repro/
 test_output/
 checkpoint/
 PRD.md
-native/target_docker/
-native/target_fix/
-native/target_static/
 suite_pid.txt
 spark/driveroutput.*
+logs/
+spark/target/

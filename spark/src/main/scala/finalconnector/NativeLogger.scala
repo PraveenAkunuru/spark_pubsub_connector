@@ -1,22 +1,23 @@
-package com.google.cloud.spark.pubsub.diagnostics
+package finalconnector
 
 import org.slf4j.LoggerFactory
 
 /**
- * Singleton entry point for Native (Rust) logs to generic Spark Log4j.
- * Called via JNI from logging.rs.
+ * Singleton entry point for Native (Rust) logs to generic Spark Log4j/SLF4J.
+ * 
+ * This object is called via JNI from the Rust side (`diagnostics/logging.rs`).
+ * It ensures that native operational logs are centralized with Spark logs 
+ * for consistent debugging and monitoring.
  */
 object NativeLogger {
   private val logger = LoggerFactory.getLogger("NativePubSub")
 
   /**
    * Log a message from Rust with a specific level.
-   * Levels match Rust's log crate:
-   * 1 = Error
-   * 2 = Warn
-   * 3 = Info
-   * 4 = Debug
-   * 5 = Trace
+   *
+   * @param level Level mapping from Rust's `log` crate:
+   *              1 = Error, 2 = Warn, 3 = Info, 4 = Debug, 5 = Trace
+   * @param msg   The log message produced by Rust
    */
   def log(level: Int, msg: String): Unit = {
     level match {

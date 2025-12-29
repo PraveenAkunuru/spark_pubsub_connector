@@ -11,6 +11,12 @@ mod sink;
 mod schema;
 mod diagnostics;
 
+/// Public API for testing and examples.
+pub mod pubsub {
+    pub use crate::core::client::PubSubClient;
+    pub use crate::core::runtime::get_runtime;
+}
+
 use tokio::runtime::Runtime;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use robusta_jni::jni::sys::jlong;
@@ -82,7 +88,7 @@ mod source_jni {
     
     /// JNI wrapper for `NativeReader` on the Scala side.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
-    #[package(com.google.cloud.spark.pubsub.source)]
+    #[package(finalconnector)]
     pub struct NativeReader<'env: 'borrow, 'borrow> {
         #[instance]
         raw: AutoLocal<'env, 'borrow>,
@@ -236,9 +242,17 @@ mod source_jni {
                 }
 
                 let (arrays, schema) = builder.finish();
-                let struct_array = arrow::array::StructArray::from(arrow::array::ArrayData::from(
-                    arrow::array::StructArray::try_from(arrow::record_batch::RecordBatch::try_new(schema, arrays).unwrap()).unwrap()
-                ));
+                let batch = match arrow::record_batch::RecordBatch::try_new(schema.clone(), arrays.clone()) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        let row_counts: Vec<usize> = arrays.iter().map(|a| a.len()).collect();
+                        let names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
+                        log::error!("Rust: RecordBatch::try_new failed: {}. Fields: {:?}, RowCounts: {:?}", e, names, row_counts);
+                        eprintln!("Rust: RecordBatch::try_new failed: {}. Fields: {:?}, RowCounts: {:?}", e, names, row_counts);
+                        return -5;
+                    }
+                };
+                let struct_array = StructArray::from(batch);
 
                 unsafe {
                     match crate::FFIGuard::new(arrow_array_addr, arrow_schema_addr) {
@@ -345,10 +359,16 @@ mod source_jni {
             })
         }
 
+        /// Closes the native reader and releases all associated resources.
+        ///
+        /// This drops the `RustPartitionReader` and triggers a full cleanup of the
+        /// `ACK_HANDLE_MAP` and `BATCH_ACK_MAP` for this partition to prevent memory leaks.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
-                    let _reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
+                    let reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
+                    log::info!("Rust: NativeReader.close called for partition {}", reader.partition_id);
+                    crate::source::cleanup_partition(reader.partition_id, None);
                 }
             })
         }
@@ -362,12 +382,11 @@ mod sink_jni {
     use robusta_jni::jni::JNIEnv;
     use robusta_jni::jni::objects::AutoLocal;
     use robusta_jni::jni::sys::jlong;
-    use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
-    use arrow::array::{StructArray, Array};
+    use arrow::array::StructArray;
 
     /// JNI wrapper for `NativeWriter` on the Scala side.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
-    #[package(com.google.cloud.spark.pubsub.sink)]
+    #[package(finalconnector)]
     pub struct NativeWriter<'env: 'borrow, 'borrow> {
         #[instance]
         raw: AutoLocal<'env, 'borrow>,

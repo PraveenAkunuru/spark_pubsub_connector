@@ -1,9 +1,10 @@
-package com.google.cloud.spark.pubsub.diagnostics
+package finalconnector
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.streaming.Trigger
 import org.apache.spark.sql.streaming.StreamingQueryListener
 import org.apache.spark.sql.streaming.StreamingQueryListener._
+import org.apache.spark.sql.types._
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -34,10 +35,19 @@ object PubSubToGCSBenchmark {
     System.err.println(s"Reporting Interval: $reportIntervalMin minutes")
     val startTime = System.currentTimeMillis()
 
+    val forcedSchema = new StructType()
+      .add("message_id", StringType, nullable = true)
+      .add("publish_time", TimestampType, nullable = true)
+      .add("payload", BinaryType, nullable = true)
+      .add("ack_id", StringType, nullable = true)
+      .add("attributes", org.apache.spark.sql.types.MapType(StringType, StringType), nullable = true)
+
     val df = spark.readStream
-      .format("pubsub-native")
+      .format("pubsub-native-v2")
+      .schema(forcedSchema)
       .option("subscriptionId", subscriptionId)
       .load()
+      .selectExpr("message_id", "publish_time", "payload", "ack_id", "attributes", "length(payload) as payload_len")
 
     val writerBase = df.writeStream
       .format("parquet")
