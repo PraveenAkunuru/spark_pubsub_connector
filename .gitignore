@@ -43,3 +43,4 @@ suite_pid.txt
 spark/driveroutput.*
 logs/
 spark/target/
+logs/

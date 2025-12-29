@@ -196,8 +196,8 @@ mod source_jni {
                     // Increased limit to 1,000,000 to accommodate 12-24 partitions (which can pull 20k each)
                     // without hitting a deadlock before the first commit.
 
-                    if unacked >= 1_000_000 {
-                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
+                    if unacked >= 1_000 {
+                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure (returning 0 messages).", unacked);
                          return 0; 
                     }
                     log::info!("Rust: getNextBatch called for part={} batch={}. Max={}, Wait={}ms. Unacked={}", 

@@ -82,4 +82,4 @@ export LD_LIBRARY_PATH="/usr/local/google/home/pakunuru/spark_pubsub_connector/n
 $JAVA_HOME/bin/java $JPMS_FLAGS -Xmx4g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
     -Djava.library.path="/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target/release" \
-    -jar sbt-launch.jar "testOnly finalconnector.ThroughputIntegrationTest"
+    -jar sbt-launch.jar "testOnly finalconnector.ThroughputIntegrationTest" 2>&1 | tee ../logs/verification_run.log
