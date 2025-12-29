@@ -199,10 +199,33 @@ mod source_jni {
                          log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
                          return 0; 
                     }
+                    if unacked >= 1_000_000 {
+                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure.", unacked);
+                         return 0; 
+                    }
+                    log::info!("Rust: getNextBatch called for part={} batch={}. Max={}, Wait={}ms. Unacked={}", 
+                        reader.partition_id, batch_id, max_messages, wait_ms, unacked);
                 }
+
+                let start_time = std::time::Instant::now();
 
                 let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
                     Ok(msgs) => msgs,
+                    Err(e) => {
+                        log::error!("Rust: fetch_batch failed: {:?}", e);
+                        return -2;
+                    }
+                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
+                    Ok(msgs) => {
+                        if !msgs.is_empty() {
+                            log::info!("Rust: fetch_batch returned {} messages for part={} after {}ms", 
+                                msgs.len(), reader.partition_id, start_time.elapsed().as_millis());
+                        } else {
+                            log::debug!("Rust: fetch_batch timeout/empty for part={} after {}ms", 
+                                reader.partition_id, start_time.elapsed().as_millis());
+                        }
+                        msgs
+                    },
                     Err(e) => {
                         log::error!("Rust: fetch_batch failed: {:?}", e);
                         return -2;
