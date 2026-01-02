@@ -28,6 +28,7 @@ pub enum DataFormat {
     #[default]
     Json,
     Avro,
+    Protobuf,
 }
 
 #[derive(Default)]
@@ -35,21 +36,38 @@ pub struct ProcessingConfig {
     pub arrow_schema: Option<Arc<Schema>>,
     pub format: DataFormat,
     pub avro_schema: Option<apache_avro::Schema>,
+    pub protobuf_descriptor: Option<String>,
+    pub protobuf_message_name: Option<String>,
     pub ca_certificate_path: Option<String>,
+    pub batch_size: Option<usize>,
+    pub batch_bytes: Option<usize>,
+    pub batch_duration_ms: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
 struct ConfigDto {
-    #[allow(dead_code)] // Used by serde for deserialization
+    #[allow(dead_code)]
     columns: Option<Vec<SimpleField>>,
-    #[allow(dead_code)] // Used by serde for deserialization
+    #[allow(dead_code)]
     format: Option<DataFormat>,
     #[serde(rename = "avroSchema")]
-    #[allow(dead_code)] // Used by serde for deserialization
+    #[allow(dead_code)]
     avro_schema: Option<String>,
+    #[serde(rename = "protobufDescriptor")]
+    #[allow(dead_code)]
+    protobuf_descriptor: Option<String>,
+    #[serde(rename = "protobufMessageName")]
+    #[allow(dead_code)]
+    protobuf_message_name: Option<String>,
     #[serde(rename = "caCertificatePath")]
-    #[allow(dead_code)] // Used by serde for deserialization
+    #[allow(dead_code)]
     ca_certificate_path: Option<String>,
+    #[serde(rename = "batchSize")]
+    batch_size: Option<usize>,
+    #[serde(rename = "batchBytes")]
+    batch_bytes: Option<usize>,
+    #[serde(rename = "batchDurationMs")]
+    batch_duration_ms: Option<u64>,
 }
 
 pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
@@ -81,7 +99,10 @@ pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
 
     let avro_schema = if let Some(s) = config.avro_schema {
         if format == DataFormat::Avro {
-            Some(apache_avro::Schema::parse_str(&s).map_err(|e| format!("Invalid Avro Schema: {}", e))?)
+            Some(
+                apache_avro::Schema::parse_str(&s)
+                    .map_err(|e| format!("Invalid Avro Schema: {}", e))?,
+            )
         } else {
             None
         }
@@ -93,14 +114,19 @@ pub fn parse_processing_config(json: &str) -> Result<ProcessingConfig, String> {
         arrow_schema,
         format,
         avro_schema,
+        protobuf_descriptor: config.protobuf_descriptor,
+        protobuf_message_name: config.protobuf_message_name,
         ca_certificate_path: config.ca_certificate_path,
+        batch_size: config.batch_size,
+        batch_bytes: config.batch_bytes,
+        batch_duration_ms: config.batch_duration_ms,
     })
 }
 
 /// Parses a simple list of fields into an Arrow Schema (Legacy/Pre-Config support)
 pub fn parse_simple_schema(json: &str) -> Option<Arc<Schema>> {
     if let Ok(fields) = serde_json::from_str::<Vec<SimpleField>>(json) {
-         let arrow_fields: Vec<Field> = fields
+        let arrow_fields: Vec<Field> = fields
             .into_iter()
             .map(|f| {
                 let dtype = match f.type_name.as_str() {
@@ -115,7 +141,7 @@ pub fn parse_simple_schema(json: &str) -> Option<Arc<Schema>> {
                 Field::new(f.name, dtype, true)
             })
             .collect();
-         return Some(Arc::new(Schema::new(arrow_fields)));
+        return Some(Arc::new(Schema::new(arrow_fields)));
     }
     None
 }

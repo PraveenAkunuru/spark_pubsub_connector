@@ -30,6 +30,10 @@ object PubSubConfig {
   /** Maximum jitter in milliseconds for partition reader initialization to avoid thundering herd. */
   val JITTER_MS_KEY = "jitterMs"
   val DEFAULT_JITTER_MS = "500"
+  /** Batch size configuration for the Rust publisher. */
+  val PUB_SUB_BATCH_SIZE_KEY = "batchSize"
+  val PUB_SUB_BATCH_BYTES_KEY = "batchBytes"
+  val PUB_SUB_BATCH_DURATION_MS_KEY = "batchDurationMs"
   /** Timeout for flushing the native publisher on close. */
   val FLUSH_TIMEOUT_MS_KEY = "flushTimeoutMs"
   val DEFAULT_FLUSH_TIMEOUT_MS = 30000L
@@ -37,6 +41,10 @@ object PubSubConfig {
   val FORMAT_KEY = "format"
   /** Optional Avro schema string. */
   val AVRO_SCHEMA_KEY = "avroSchema"
+  /** Optional Base64-encoded Protobuf FileDescriptorSet. */
+  val PROTOBUF_DESCRIPTOR_KEY = "protobufDescriptor"
+  /** Optional Protobuf Message Name (fully qualified). */
+  val PROTOBUF_MESSAGE_NAME_KEY = "protobufMessageName"
   /** Optional explicit CA certificate path for custom VPC configurations. */
   val CA_CERTIFICATE_PATH_KEY = "caCertificatePath"
   /** Expected throughput in MB/s for intelligent partitioning. */
@@ -97,16 +105,23 @@ object PubSubConfig {
    * enabling schema-aware projection and parsing on the Rust side.
    * 
    * @param schema Spark schema for projection.
-   * @param format Optional data format (JSON/Avro).
+   * @param format Optional data format (JSON/Avro/Protobuf).
    * @param avroSchema Optional Avro schema.
+   * @param protobufDescriptor Optional Protobuf descriptor (Base64).
+   * @param protobufMessageName Optional Protobuf message name.
    * @param caCertificatePath Optional path to a CA certificate bundle.
    * @return A JSON string compatible with the Rust `ProcessingConfig`.
    */
   def buildProcessingConfigJson(
       schema: org.apache.spark.sql.types.StructType, 
-      format: Option[String], 
+      format: Option[String],
       avroSchema: Option[String],
-      caCertificatePath: Option[String]): String = {
+      protobufDescriptor: Option[String],
+      protobufMessageName: Option[String],
+      caCertificatePath: Option[String],
+      batchSize: Option[Int],
+      batchBytes: Option[Long],
+      batchDurationMs: Option[Long]): String = {
     import org.apache.spark.sql.types._
     val mapper = new com.fasterxml.jackson.databind.ObjectMapper()
     val rootArgs = mapper.createObjectNode()
@@ -131,7 +146,12 @@ object PubSubConfig {
 
     format.foreach(f => rootArgs.put("format", f))
     avroSchema.foreach(s => rootArgs.put("avroSchema", s))
+    protobufDescriptor.foreach(p => rootArgs.put("protobufDescriptor", p))
+    protobufMessageName.foreach(m => rootArgs.put("protobufMessageName", m))
     caCertificatePath.foreach(p => rootArgs.put("caCertificatePath", p))
+    batchSize.foreach(b => rootArgs.put("batchSize", b))
+    batchBytes.foreach(b => rootArgs.put("batchBytes", b))
+    batchDurationMs.foreach(b => rootArgs.put("batchDurationMs", b))
 
     mapper.writeValueAsString(rootArgs)
   }

@@ -7,10 +7,10 @@
 //! to decouple Rust execution from JNI/JVM latency.
 
 use log::{Level, Log, Metadata, Record};
+use std::cell::RefCell;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Once, OnceLock};
 use std::thread;
-use std::sync::mpsc::SyncSender;
-use std::cell::RefCell;
 
 /// Global sender for the logging channel.
 static SENDER: OnceLock<SyncSender<(Level, String)>> = OnceLock::new();
@@ -91,7 +91,7 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if let Err(e) = log::set_logger(&JniLogger) {
-         eprintln!("Rust Logging: Logger already set: {:?}", e);
+        eprintln!("Rust Logging: Logger already set: {:?}", e);
     }
     log::set_max_level(level_filter);
 
@@ -105,15 +105,19 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
 
     // Retrieve the Scala singleton MODULE$ instance.
     let module_field = env.get_static_field_id(LOGGER_CLASS, "MODULE$", LOGGER_SIG)?;
-    let jval = env.get_static_field_unchecked(LOGGER_CLASS, module_field, jni::signature::JavaType::Object(LOGGER_SIG.to_string()))?;
-    
+    let jval = env.get_static_field_unchecked(
+        LOGGER_CLASS,
+        module_field,
+        jni::signature::JavaType::Object(LOGGER_SIG.to_string()),
+    )?;
+
     let logger_obj = match jval {
         jni::objects::JValue::Object(obj) => obj,
         _ => return Err("Failed to get MODULE$ object".into()),
     };
-    
+
     if logger_obj.is_null() {
-         return Err("NativeLogger MODULE$ is NULL".into());
+        return Err("NativeLogger MODULE$ is NULL".into());
     }
 
     let logger_obj_global = env.new_global_ref(logger_obj)?;
@@ -128,13 +132,17 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // Scala NativeLogger.log(level: Int, msg: String)
-        let log_method = match env.get_method_id(&logger_class_global, "log", "(ILjava/lang/String;)V") {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("Rust Logging: Failed to get log method in background thread: {:?}", e);
-                return;
-            }
-        };
+        let log_method =
+            match env.get_method_id(&logger_class_global, "log", "(ILjava/lang/String;)V") {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!(
+                        "Rust Logging: Failed to get log method in background thread: {:?}",
+                        e
+                    );
+                    return;
+                }
+            };
 
         let mut failure_count = 0;
 
@@ -165,7 +173,10 @@ fn init_internal(env: &jni::JNIEnv) -> Result<(), Box<dyn std::error::Error>> {
             if res.is_err() || env.exception_check().unwrap_or(false) {
                 failure_count += 1;
                 if failure_count < 10 {
-                    eprintln!("Rust Logging: JNI call failed (count: {}). Clearing exception.", failure_count);
+                    eprintln!(
+                        "Rust Logging: JNI call failed (count: {}). Clearing exception.",
+                        failure_count
+                    );
                     let _ = env.exception_describe();
                     let _ = env.exception_clear();
                 }

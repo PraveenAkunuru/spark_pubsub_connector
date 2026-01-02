@@ -24,8 +24,6 @@ use crate::source::ACK_HANDLE_MAP;
 /// This allows JNI calls to reference persistent client state across micro-batches.
 pub static CLIENT_REGISTRY: Lazy<DashMap<i32, Arc<PubSubClient>>> = Lazy::new(DashMap::new);
 
-
-
 /// A wrapper around the Pub/Sub subscriber client providing buffering and batching.
 pub struct PubSubClient {
     /// Internal receiver for messages pulled from the Pub/Sub service.
@@ -63,15 +61,15 @@ impl PubSubClient {
         let subscription = client.subscription(&full_sub_name);
 
         let sub_config = SubscriberConfig {
-            max_outstanding_messages: 10_000, // Reduced from 20k to be safer across many partitions
-            max_outstanding_bytes: 200 * 1024 * 1024, // 200MB (Reduced from 500MB)
+            max_outstanding_messages: 10_000,
+            max_outstanding_bytes: 200 * 1024 * 1024,
             ..Default::default()
         };
 
         let config = SubscribeConfig::default().with_subscriber_config(sub_config);
 
         // Channel to bridge Library -> Spark (Deep buffer)
-        let (tx, rx) = mpsc::channel::<LowLevelMessage>(20_000); // Reduced from 50k
+        let (tx, rx) = mpsc::channel::<LowLevelMessage>(20_000);
         let sub_clone = subscription.clone();
         let sub_name_clone = full_sub_name.clone();
 

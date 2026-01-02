@@ -74,18 +74,18 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
     logDebug(s"planInputPartitions called with start=$start, end=$end")
     
-    logInfo(s"Options: $options")
+    logDebug(s"Options: $options")
     val requestedPartitions = PubSubConfig.getOption(PubSubConfig.NUM_PARTITIONS_KEY, options, spark).map(_.toInt)
-    logInfo(s"Requested Partitions: $requestedPartitions")
+    logDebug(s"Requested Partitions: $requestedPartitions")
     
     val numPartitions = requestedPartitions.getOrElse {
       val conf = spark.sparkContext.getConf
       
       // Diagnostic logging to understand environment
-      logInfo("Spark Configuration for Partitioning:")
+      logDebug("Spark Configuration for Partitioning:")
       conf.getAll.filter(p => 
         p._1.contains("executor") || p._1.contains("dynamicAllocation") || p._1.contains("master")
-      ).foreach(p => logInfo(s"  ${p._1} = ${p._2}"))
+      ).foreach(p => logDebug(s"  ${p._1} = ${p._2}"))
 
       val coresPerExecutor = conf.getOption("spark.executor.cores").map(_.toInt).getOrElse(1)
       val numExecutors = conf.getOption("spark.executor.instances").map(_.toInt)
@@ -105,7 +105,7 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       val base = Math.max(tFloor, pHeadroom)
       val hcn = findNextHighlyCompositeNumber(base)
       
-      logInfo(s"Intelligent Partitioning: cores=$cores (executors=$numExecutors, coresPerExec=$coresPerExecutor), expectedMbS=$expectedMbS => base=$base, hcn=$hcn")
+      logDebug(s"Intelligent Partitioning: cores=$cores (executors=$numExecutors, coresPerExec=$coresPerExecutor), expectedMbS=$expectedMbS => base=$base, hcn=$hcn")
       hcn
     }
 
@@ -119,7 +119,7 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       }
     }
     expiredBatches.foreach(pendingCommits.remove)
-    logInfo(s"Planning $numPartitions input partitions")
+    logDebug(s"Planning $numPartitions input partitions")
 
     val committedSignals = pendingCommits.keys.toList
     
@@ -127,6 +127,8 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       .getOrElse(PubSubConfig.DEFAULT_JITTER_MS).toInt
     val format = PubSubConfig.getOption(PubSubConfig.FORMAT_KEY, options, spark)
     val avroSchema = PubSubConfig.getOption(PubSubConfig.AVRO_SCHEMA_KEY, options, spark)
+    val protobufDescriptor = PubSubConfig.getOption(PubSubConfig.PROTOBUF_DESCRIPTOR_KEY, options, spark)
+    val protobufMessageName = PubSubConfig.getOption(PubSubConfig.PROTOBUF_MESSAGE_NAME_KEY, options, spark)
     val caCertificatePath = PubSubConfig.getOption(PubSubConfig.CA_CERTIFICATE_PATH_KEY, options, spark)
     val readBatchSize = PubSubConfig.getOption(PubSubConfig.BATCH_SIZE_KEY, options, spark)
       .getOrElse(PubSubConfig.DEFAULT_BATCH_SIZE.toString).toInt
@@ -134,7 +136,7 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       .getOrElse(PubSubConfig.DEFAULT_READ_WAIT_MS).toLong
 
     (0 until numPartitions).map { i =>
-      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema, caCertificatePath, readBatchSize, readWaitMs)
+      PubSubInputPartition(i, projectId, subscriptionId, committedSignals, end.json(), jitterMillis, format, avroSchema, protobufDescriptor, protobufMessageName, caCertificatePath, readBatchSize, readWaitMs)
     }.toArray
   }
 
@@ -174,6 +176,8 @@ case class PubSubInputPartition(
     jitterMillis: Int,
     format: Option[String],
     avroSchema: Option[String],
+    protobufDescriptor: Option[String],
+    protobufMessageName: Option[String],
     caCertificatePath: Option[String],
     batchSize: Int,
     readWaitMs: Long) extends InputPartition

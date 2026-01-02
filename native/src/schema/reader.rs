@@ -19,21 +19,33 @@ use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::schema::DataFormat;
+
 /// Reader for converting Arrow `StructArray`s back into `PubsubMessage` objects.
 pub struct ArrowBatchReader<'a> {
     /// The underlying Arrow StructArray containing the batch data.
     array: &'a StructArray,
+    format: DataFormat,
+    avro_schema: Option<apache_avro::Schema>,
 }
 
 impl<'a> ArrowBatchReader<'a> {
     /// Creates a new ArrowBatchReader for the given StructArray.
-    pub fn new(array: &'a StructArray) -> Self {
-        Self { array }
+    pub fn new(
+        array: &'a StructArray,
+        format: DataFormat,
+        avro_schema: Option<apache_avro::Schema>,
+    ) -> Self {
+        Self {
+            array,
+            format,
+            avro_schema,
+        }
     }
 
     /// Converts the entire Arrow batch into a vector of `PubsubMessage`s.
     ///
-    /// This method automatically detects the operational mode based on the 
+    /// This method automatically detects the operational mode based on the
     /// presence of a 'payload' column.
     pub fn to_pubsub_messages(&self) -> Result<Vec<PubsubMessage>, Box<dyn std::error::Error>> {
         let num_rows = self.array.len();
@@ -45,15 +57,12 @@ impl<'a> ArrowBatchReader<'a> {
 
         if let Some(col) = payload_col {
             // === RAW MODE ===
-            let payload_binary = col
-                .as_any()
-                .downcast_ref::<BinaryArray>()
-                .ok_or_else(|| {
-                    format!(
-                        "'payload' column must be Binary, found {:?}",
-                        col.data_type()
-                    )
-                })?;
+            let payload_binary = col.as_any().downcast_ref::<BinaryArray>().ok_or_else(|| {
+                format!(
+                    "'payload' column must be Binary, found {:?}",
+                    col.data_type()
+                )
+            })?;
 
             let ordering_key_col = self.array.column_by_name("ordering_key");
 
@@ -106,10 +115,16 @@ impl<'a> ArrowBatchReader<'a> {
         } else {
             // === STRUCTURED MODE ===
             // Identify metadata columns to exclude from the data payload
-            let reserved_fields = ["message_id", "publish_time", "ack_id", "ordering_key", "attributes"];
+            let reserved_fields = [
+                "message_id",
+                "publish_time",
+                "ack_id",
+                "ordering_key",
+                "attributes",
+            ];
             let mut data_indices = Vec::new();
             let mut data_fields = Vec::new();
-            
+
             for (idx, field) in self.array.fields().iter().enumerate() {
                 if !reserved_fields.contains(&field.name().as_str()) {
                     data_indices.push(idx);
@@ -117,46 +132,95 @@ impl<'a> ArrowBatchReader<'a> {
                 }
             }
 
-            // Project the batch to data-only columns for JSON serialization
-            let data_columns: Vec<arrow::array::ArrayRef> = data_indices.iter().map(|&i| self.array.column(i).clone()).collect();
+            // Project the batch to data-only columns serialization
+            let data_columns: Vec<arrow::array::ArrayRef> = data_indices
+                .iter()
+                .map(|&i| self.array.column(i).clone())
+                .collect();
             let data_schema = Arc::new(Schema::new(data_fields));
             let data_batch = RecordBatch::try_new(data_schema, data_columns)?;
-            
-            let mut json_buf = Vec::new();
-            {
-                let mut writer = arrow::json::LineDelimitedWriter::new(&mut json_buf);
-                writer.write(&data_batch)?;
-                writer.finish()?;
-            }
 
             let ordering_key_col = self.array.column_by_name("ordering_key");
-            
             let mut messages = Vec::with_capacity(num_rows);
-            let mut lines = json_buf.split(|&b| b == b'\n');
 
-            for i in 0..num_rows {
-                let data = lines.next().unwrap_or(&[]).to_vec();
-                
-                let ordering_key = if let Some(col) = ordering_key_col {
-                    if !col.is_null(i) {
-                        arrow::util::display::array_value_to_string(col, i).unwrap_or_default()
-                    } else {
-                        "".to_string()
+            match self.format {
+                DataFormat::Json => {
+                    let mut json_buf = Vec::new();
+                    {
+                        let mut writer = arrow::json::LineDelimitedWriter::new(&mut json_buf);
+                        writer.write(&data_batch)?;
+                        writer.finish()?;
                     }
-                } else {
-                    "".to_string()
-                };
 
-                messages.push(PubsubMessage {
-                    data,
-                    attributes: HashMap::new(),
-                    message_id: "".to_string(),
-                    publish_time: None,
-                    ordering_key,
-                });
+                    let mut lines = json_buf.split(|&b| b == b'\n');
+                    for i in 0..num_rows {
+                        let data = lines.next().unwrap_or(&[]).to_vec();
+                        let ordering_key = Self::get_ordering_key(ordering_key_col, i);
+                        messages.push(PubsubMessage {
+                            data,
+                            attributes: HashMap::new(),
+                            message_id: "".to_string(),
+                            publish_time: None,
+                            ordering_key,
+                        });
+                    }
+                }
+                DataFormat::Avro => {
+                    let schema = self
+                        .avro_schema
+                        .as_ref()
+                        .ok_or("Avro schema required for Avro format")?;
+
+                    // Convert to JSON Values first (Intermediate)
+                    // We use a buffer to capture JSON lines, then parse them back.
+                    // Efficient? No. Practical? Yes.
+                    let mut json_buf = Vec::new();
+                    {
+                        let mut writer = arrow::json::LineDelimitedWriter::new(&mut json_buf);
+                        writer.write(&data_batch)?;
+                        writer.finish()?;
+                    }
+
+                    let mut lines = json_buf.split(|&b| b == b'\n');
+                    for i in 0..num_rows {
+                        let line_slice = lines.next().unwrap_or(&[]);
+                        if line_slice.is_empty() {
+                            continue;
+                        } // Should not happen if rows exist
+
+                        let json_val: serde_json::Value = serde_json::from_slice(line_slice)?;
+                        let avro_val = apache_avro::types::Value::from(json_val);
+                        // Resolve against schema to ensure correctness
+                        let resolved = avro_val.resolve(schema)?;
+                        let data = apache_avro::to_avro_datum(schema, resolved)?;
+
+                        let ordering_key = Self::get_ordering_key(ordering_key_col, i);
+                        messages.push(PubsubMessage {
+                            data,
+                            attributes: HashMap::new(),
+                            message_id: "".to_string(),
+                            publish_time: None,
+                            ordering_key,
+                        });
+                    }
+                }
+                DataFormat::Protobuf => {
+                    // Protobuf Sink support not yet implemented
+                    log::warn!("Rust: Protobuf Sink not yet implemented. Dropping messages.");
+                    return Err("Protobuf Sink not implemented".into());
+                }
             }
 
             Ok(messages)
         }
+    }
+
+    fn get_ordering_key(col: Option<&arrow::array::ArrayRef>, i: usize) -> String {
+        if let Some(c) = col {
+            if !c.is_null(i) {
+                return arrow::util::display::array_value_to_string(c, i).unwrap_or_default();
+            }
+        }
+        "".to_string()
     }
 }

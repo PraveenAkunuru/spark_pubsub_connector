@@ -4,8 +4,8 @@
 //! operations (Pub/Sub pulls, JNI async orchestration) to ensure efficient
 //! resource sharing and prevent thread explosion in the JVM.
 
-use tokio::runtime::Runtime;
 use std::sync::OnceLock;
+use tokio::runtime::Runtime;
 
 static GLOBAL_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
@@ -20,7 +20,7 @@ pub fn get_runtime() -> &'static Runtime {
             .map(|n| n.get())
             .unwrap_or(32)
             .clamp(16, 128);
-            
+
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(threads)

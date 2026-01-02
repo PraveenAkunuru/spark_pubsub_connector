@@ -31,11 +31,13 @@ abstract class PubSubPartitionReaderBase[T](
     schema, 
     partition.format, 
     partition.avroSchema,
-    partition.caCertificatePath
+    partition.protobufDescriptor,
+    partition.protobufMessageName,
+    partition.caCertificatePath,
+    None, None, None
   )
 
-  System.err.println(s"DEBUG EXECUTOR: Initializing partition ${partition.partitionId} (Batch: ${partition.batchId})")
-  System.err.println(s"DEBUG EXECUTOR: JNI Init parameters -> projectId='${partition.projectId}', subscriptionId='${partition.subscriptionId}'")
+
 
   protected val nativePtr: Long = try {
     reader.init(
@@ -48,11 +50,11 @@ abstract class PubSubPartitionReaderBase[T](
   } catch {
     case e: Throwable =>
       logError(s"Fatal error during NativeReader.init: ${e.getMessage}", e)
-      throw new RuntimeException(s"DEBUG_FATAL: proj='${partition.projectId}', sub='${partition.subscriptionId}', err=${e.getMessage}", e)
+      throw new RuntimeException(s"Failed to initialize NativeReader for proj='${partition.projectId}', sub='${partition.subscriptionId}'", e)
   }
 
   if (nativePtr == 0) {
-    throw new RuntimeException(s"DEBUG_PTR_ZERO: proj='${partition.projectId}', sub='${partition.subscriptionId}'")
+    throw new RuntimeException(s"NativeReader.init returned NULL pointer for proj='${partition.projectId}'")
   }
   protected val allocator = new RootAllocator()
 

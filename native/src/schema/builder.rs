@@ -12,16 +12,18 @@
 //!    a user-defined Arrow schema. Fields missing in the payload but present in
 //!    Pub/Sub attributes are automatically backfilled.
 
+use super::{DataFormat, ProcessingConfig};
+use apache_avro::types::Value as AvroValue;
 use arrow::array::{
-    ArrayRef, BinaryBuilder, BooleanBuilder, Float64Builder, Int32Builder,
-    Int64Builder, MapBuilder, MapFieldNames, StringBuilder, TimestampMicrosecondBuilder,
+    ArrayRef, BinaryBuilder, BooleanBuilder, Float64Builder, Int32Builder, Int64Builder,
+    MapBuilder, MapFieldNames, StringBuilder, TimestampMicrosecondBuilder,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use base64::prelude::*;
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage;
+use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
 use serde_json::Value;
 use std::sync::Arc;
-use super::DataFormat;
-use apache_avro::types::Value as AvroValue;
 
 /// Typed wrapper around concrete Arrow builders to avoid dynamic dispatch in hot loops.
 pub enum TypedBuilder {
@@ -36,7 +38,9 @@ impl TypedBuilder {
     /// Creates a new TypedBuilder for the specified DataType.
     pub fn new(dtype: &DataType, capacity: usize) -> Self {
         match dtype {
-            DataType::Utf8 => TypedBuilder::Utf8(StringBuilder::with_capacity(capacity, capacity * 32)),
+            DataType::Utf8 => {
+                TypedBuilder::Utf8(StringBuilder::with_capacity(capacity, capacity * 32))
+            }
             DataType::Int32 => TypedBuilder::Int32(Int32Builder::with_capacity(capacity)),
             DataType::Int64 => TypedBuilder::Int64(Int64Builder::with_capacity(capacity)),
             DataType::Float64 => TypedBuilder::Float64(Float64Builder::with_capacity(capacity)),
@@ -81,23 +85,15 @@ pub struct ArrowBatchBuilder {
     payloads: Option<BinaryBuilder>,
     struct_builders: Option<Vec<TypedBuilder>>,
     struct_fields: Vec<Field>,
-    
+
     format: DataFormat,
     avro_schema: Option<apache_avro::Schema>,
+    protobuf_descriptor: Option<MessageDescriptor>,
 }
 
 impl ArrowBatchBuilder {
     /// Creates a new ArrowBatchBuilder.
-    ///
-    /// # Arguments
-    /// * `schema` - Optional Arrow schema for structured projection.
-    /// * `format` - Message payload format (JSON or Avro).
-    /// * `avro_schema` - Optional Avro schema if format is Avro.
-    pub fn new(
-        schema: Option<SchemaRef>, 
-        format: DataFormat,
-        avro_schema: Option<apache_avro::Schema>
-    ) -> Self {
+    pub fn new(config: &ProcessingConfig) -> Self {
         // Spark expects singular "key"/"value" names for Map entries to avoid schema mismatch.
         let map_names = MapFieldNames {
             entry: "entries".to_string(),
@@ -105,14 +101,20 @@ impl ArrowBatchBuilder {
             value: "value".to_string(),
         };
 
-        if let Some(s) = schema {
+        if let Some(s) = &config.arrow_schema {
             // Structured Mode: Exclude metadata fields from the payload struct
             let allowed_fields: Vec<Field> = s
                 .fields()
                 .iter()
                 .filter(|f| {
-                    !["message_id", "publish_time", "payload", "ack_id", "attributes"]
-                        .contains(&f.name().as_str())
+                    ![
+                        "message_id",
+                        "publish_time",
+                        "payload",
+                        "ack_id",
+                        "attributes",
+                    ]
+                    .contains(&f.name().as_str())
                 })
                 .map(|f| f.as_ref().clone())
                 .collect();
@@ -124,17 +126,56 @@ impl ArrowBatchBuilder {
 
             let has_payload = s.fields().iter().any(|f| f.name() == "payload");
 
+            let protobuf_descriptor = if config.format == DataFormat::Protobuf {
+                if let (Some(desc_b64), Some(msg_name)) =
+                    (&config.protobuf_descriptor, &config.protobuf_message_name)
+                {
+                    match BASE64_STANDARD.decode(desc_b64) {
+                        Ok(bytes) => match DescriptorPool::decode(bytes.as_slice()) {
+                            Ok(pool) => pool.get_message_by_name(msg_name),
+                            Err(e) => {
+                                log::error!(
+                                    "Rust: Failed to decode Protobuf DescriptorPool: {}",
+                                    e
+                                );
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            log::error!("Rust: Failed to base64 decode protobuf descriptor: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    log::error!(
+                        "Rust: Protobuf format selected but descriptor or message name missing."
+                    );
+                    None
+                }
+            } else {
+                None
+            };
+
             Self {
                 message_ids: StringBuilder::new(),
                 publish_times: TimestampMicrosecondBuilder::new(),
                 ack_ids: StringBuilder::new(),
-                attributes: MapBuilder::new(Some(map_names), StringBuilder::new(), StringBuilder::new()),
+                attributes: MapBuilder::new(
+                    Some(map_names),
+                    StringBuilder::new(),
+                    StringBuilder::new(),
+                ),
                 is_raw: false,
-                payloads: if has_payload { Some(BinaryBuilder::new()) } else { None },
+                payloads: if has_payload {
+                    Some(BinaryBuilder::new())
+                } else {
+                    None
+                },
                 struct_builders: Some(builders),
                 struct_fields: allowed_fields,
-                format,
-                avro_schema,
+                format: config.format,
+                avro_schema: config.avro_schema.clone(),
+                protobuf_descriptor,
             }
         } else {
             // Raw Mode: Just metadata and the raw byte payload
@@ -142,13 +183,18 @@ impl ArrowBatchBuilder {
                 message_ids: StringBuilder::new(),
                 publish_times: TimestampMicrosecondBuilder::new(),
                 ack_ids: StringBuilder::new(),
-                attributes: MapBuilder::new(Some(map_names), StringBuilder::new(), StringBuilder::new()),
+                attributes: MapBuilder::new(
+                    Some(map_names),
+                    StringBuilder::new(),
+                    StringBuilder::new(),
+                ),
                 is_raw: true,
                 payloads: Some(BinaryBuilder::new()),
                 struct_builders: None,
                 struct_fields: Vec::new(),
                 format: DataFormat::Json,
                 avro_schema: None,
+                protobuf_descriptor: None,
             }
         }
     }
@@ -168,13 +214,15 @@ impl ArrowBatchBuilder {
         };
         self.publish_times.append_value(timestamp_micros);
         self.ack_ids.append_value(&recv_msg.ack_id);
-        
+
         // Append Attributes Map
         for (k, v) in &msg.attributes {
             self.attributes.keys().append_value(k);
             self.attributes.values().append_value(v);
         }
-        self.attributes.append(true).expect("Failed to append attributes map");
+        self.attributes
+            .append(true)
+            .expect("Failed to append attributes map");
 
         if let Some(p) = self.payloads.as_mut() {
             p.append_value(&msg.data);
@@ -190,14 +238,44 @@ impl ArrowBatchBuilder {
                     let json_val = json_res.as_ref().ok();
                     Self::append_json_to_row(builders, fields, json_val, &msg.attributes);
                 }
-                DataFormat::Avro => {
-                    match &self.avro_schema {
-                        Some(schema) => {
-                             let avro_val = apache_avro::from_avro_datum(schema, &mut &msg.data[..], None).ok();
-                             Self::append_avro_to_row(builders, fields, avro_val.as_ref(), &msg.attributes);
+                DataFormat::Avro => match &self.avro_schema {
+                    Some(schema) => {
+                        let avro_val =
+                            apache_avro::from_avro_datum(schema, &mut &msg.data[..], None).ok();
+                        Self::append_avro_to_row(
+                            builders,
+                            fields,
+                            avro_val.as_ref(),
+                            &msg.attributes,
+                        );
+                    }
+                    None => {
+                        Self::append_nulls_for_all(builders);
+                    }
+                },
+                DataFormat::Protobuf => {
+                    match &self.protobuf_descriptor {
+                        Some(desc) => {
+                            match DynamicMessage::decode(desc.clone(), msg.data.as_slice()) {
+                                Ok(dynamic_msg) => {
+                                    // Convert to JSON Value (Intermediate)
+                                    // serde::Serialize is implemented for DynamicMessage
+                                    let json_val = serde_json::to_value(&dynamic_msg).ok();
+                                    Self::append_json_to_row(
+                                        builders,
+                                        fields,
+                                        json_val.as_ref(),
+                                        &msg.attributes,
+                                    );
+                                }
+                                Err(e) => {
+                                    log::debug!("Rust: Failed to decode Protobuf message: {}", e);
+                                    Self::append_nulls_for_all(builders);
+                                }
+                            }
                         }
                         None => {
-                             Self::append_nulls_for_all(builders);
+                            Self::append_nulls_for_all(builders);
                         }
                     }
                 }
@@ -240,10 +318,7 @@ impl ArrowBatchBuilder {
         }
     }
 
-    fn append_avro_value(
-        builder: &mut TypedBuilder,
-        value: &AvroValue,
-    ) {
+    fn append_avro_value(builder: &mut TypedBuilder, value: &AvroValue) {
         match builder {
             TypedBuilder::Utf8(b) => {
                 let s = match value {
@@ -286,11 +361,11 @@ impl ArrowBatchBuilder {
             }
         }
     }
-    
+
     fn append_nulls_for_all(builders: &mut [TypedBuilder]) {
-         for b in builders {
-             b.append_null();
-         }
+        for b in builders {
+            b.append_null();
+        }
     }
 
     /// Appends a structured row from a JSON value, with attribute fallback.
@@ -303,7 +378,7 @@ impl ArrowBatchBuilder {
         for (i, field) in fields.iter().enumerate() {
             let field_name = field.name();
             let val = json.and_then(|j| j.get(field_name));
-            
+
             match val {
                 Some(v) if !v.is_null() => {
                     Self::append_json_value(&mut builders[i], v);
@@ -318,24 +393,18 @@ impl ArrowBatchBuilder {
             }
         }
     }
-    
-    fn append_attr_value(
-        builder: &mut TypedBuilder,
-        value: &str,
-    ) {
-         match builder {
+
+    fn append_attr_value(builder: &mut TypedBuilder, value: &str) {
+        match builder {
             TypedBuilder::Utf8(b) => b.append_value(value),
             TypedBuilder::Int32(b) => b.append_value(value.parse::<i32>().unwrap_or(0)),
             TypedBuilder::Int64(b) => b.append_value(value.parse::<i64>().unwrap_or(0)),
             TypedBuilder::Float64(b) => b.append_value(value.parse::<f64>().unwrap_or(0.0)),
             TypedBuilder::Boolean(b) => b.append_value(value.parse::<bool>().unwrap_or(false)),
-         }
+        }
     }
 
-    fn append_json_value(
-        builder: &mut TypedBuilder,
-        v: &Value,
-    ) {
+    fn append_json_value(builder: &mut TypedBuilder, v: &Value) {
         match builder {
             TypedBuilder::Utf8(b) => {
                 if let Some(s) = v.as_str() {
@@ -405,7 +474,18 @@ mod tests {
 
     #[test]
     fn test_arrow_batch_builder_raw() {
-        let mut builder = ArrowBatchBuilder::new(None, DataFormat::Json, None);
+        let config = ProcessingConfig {
+            arrow_schema: None,
+            format: DataFormat::Json,
+            avro_schema: None,
+            protobuf_descriptor: None,
+            protobuf_message_name: None,
+            ca_certificate_path: None,
+            batch_size: None,
+            batch_bytes: None,
+            batch_duration_ms: None,
+        };
+        let mut builder = ArrowBatchBuilder::new(&config);
 
         let msg1 = ReceivedMessage {
             ack_id: "ack1".to_string(),
@@ -447,7 +527,18 @@ mod tests {
         ];
         let schema = Arc::new(Schema::new(fields));
 
-        let mut builder = ArrowBatchBuilder::new(Some(schema), DataFormat::Json, None);
+        let config = ProcessingConfig {
+            arrow_schema: Some(schema),
+            format: DataFormat::Json,
+            avro_schema: None,
+            protobuf_descriptor: None,
+            protobuf_message_name: None,
+            ca_certificate_path: None,
+            batch_size: None,
+            batch_bytes: None,
+            batch_duration_ms: None,
+        };
+        let mut builder = ArrowBatchBuilder::new(&config);
 
         let mut attr = HashMap::new();
         attr.insert("source".to_string(), "pubsub_attribute".to_string());
@@ -458,7 +549,8 @@ mod tests {
                 data: serde_json::to_vec(&serde_json::json!({
                     "name": "Alice",
                     "age": 30
-                })).unwrap(),
+                }))
+                .unwrap(),
                 attributes: attr,
                 message_id: "id1".to_string(),
                 publish_time: None,
@@ -470,13 +562,21 @@ mod tests {
         builder.append(&msg1);
         let (arrays, _) = builder.finish();
 
-        let name_arr = arrays[4].as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
-        let age_arr = arrays[5].as_any().downcast_ref::<arrow::array::Int32Array>().unwrap();
-        let source_arr = arrays[6].as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
+        let name_arr = arrays[4]
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
+        let age_arr = arrays[5]
+            .as_any()
+            .downcast_ref::<arrow::array::Int32Array>()
+            .unwrap();
+        let source_arr = arrays[6]
+            .as_any()
+            .downcast_ref::<arrow::array::StringArray>()
+            .unwrap();
 
         assert_eq!(name_arr.value(0), "Alice");
         assert_eq!(age_arr.value(0), 30);
         assert_eq!(source_arr.value(0), "pubsub_attribute");
     }
 }
-

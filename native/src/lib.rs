@@ -6,10 +6,10 @@
 use robusta_jni::bridge;
 
 mod core;
-mod source;
-mod sink;
-mod schema;
 mod diagnostics;
+mod schema;
+mod sink;
+mod source;
 
 /// Public API for testing and examples.
 pub mod pubsub {
@@ -17,9 +17,12 @@ pub mod pubsub {
     pub use crate::core::runtime::get_runtime;
 }
 
-use tokio::runtime::Runtime;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use robusta_jni::jni::sys::jlong;
+use tokio::runtime::Runtime;
+
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 /// Helper to safeguard FFI pointers before accessing them.
 struct FFIGuard {
@@ -33,7 +36,7 @@ impl FFIGuard {
         if array == 0 || schema == 0 {
             return Err("Received NULL pointer for Arrow FFI");
         }
-        
+
         let array_ptr = array as *mut FFI_ArrowArray;
         let schema_ptr = schema as *mut FFI_ArrowSchema;
 
@@ -66,26 +69,31 @@ where
             } else {
                 "Panic occurred (unknown cause)".to_string()
             };
-            
+
             let backtrace = std::backtrace::Backtrace::capture();
-            log::error!("Rust: Panic in JNI call: {}\nBacktrace: {:?}", msg, backtrace);
-            eprintln!("Rust: Panic in JNI call: {}\nBacktrace: {:?}", msg, backtrace);
+            log::error!(
+                "Rust: Panic in JNI call: {}\nBacktrace: {:?}",
+                msg,
+                backtrace
+            );
+
             error_val
         }
     }
 }
 
-
 #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #[bridge]
 mod source_jni {
-    use robusta_jni::convert::{Signature, IntoJavaValue, FromJavaValue, TryIntoJavaValue, TryFromJavaValue};
-    use robusta_jni::jni::JNIEnv;
+    use arrow::array::{Array, StructArray};
+    use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
+    use robusta_jni::convert::{
+        FromJavaValue, IntoJavaValue, Signature, TryFromJavaValue, TryIntoJavaValue,
+    };
     use robusta_jni::jni::objects::AutoLocal;
     use robusta_jni::jni::sys::jlong;
-    use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
-    use arrow::array::{StructArray, Array};
-    
+    use robusta_jni::jni::JNIEnv;
+
     /// JNI wrapper for `NativeReader` on the Scala side.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
     #[package(finalconnector)]
@@ -95,13 +103,29 @@ mod source_jni {
     }
 
     impl<'env: 'borrow, 'borrow> NativeReader<'env, 'borrow> {
-        
-        pub extern "jni" fn init(self, env: &JNIEnv, project_id: String, subscription_id: String, jitter_millis: i32, schema_json: String, partition_id: i32) -> jlong {
+        pub extern "jni" fn init(
+            self,
+            env: &JNIEnv,
+            project_id: String,
+            subscription_id: String,
+            jitter_millis: i32,
+            schema_json: String,
+            partition_id: i32,
+        ) -> jlong {
             crate::diagnostics::logging::init(env);
-            
+
             crate::safe_jni_call(0, || {
                 crate::diagnostics::logging::set_context(&format!("[Partition: {}]", partition_id));
-                log::info!("Rust: NativeReader.init called for partition: {}", partition_id);
+                log::info!(
+                    "Rust: NativeReader.init called for partition: {}",
+                    partition_id
+                );
+
+                if let Ok(host) = std::env::var("PUBSUB_EMULATOR_HOST") {
+                    log::info!("Rust: Using Pub/Sub Emulator at: {}", host);
+                } else {
+                    log::warn!("Rust: PUBSUB_EMULATOR_HOST not set");
+                }
 
                 if jitter_millis > 0 {
                     let mut rng = rand::thread_rng();
@@ -109,37 +133,55 @@ mod source_jni {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                 }
 
-                let (client, config) = if let Some(c) = crate::core::client::CLIENT_REGISTRY.get(&partition_id) {
-                    log::info!("Rust: Reusing existing PubSubClient for partition {}", partition_id);
-                    
+                let (client, config) = if let Some(c) =
+                    crate::core::client::CLIENT_REGISTRY.get(&partition_id)
+                {
+                    log::info!(
+                        "Rust: Reusing existing PubSubClient for partition {}",
+                        partition_id
+                    );
+
                     let cfg = if !schema_json.is_empty() {
-                         if schema_json.trim_start().starts_with('[') {
-                             let s = crate::schema::parse_simple_schema(&schema_json);
-                             crate::schema::ProcessingConfig {
-                                 arrow_schema: s,
-                                 format: crate::schema::DataFormat::Json,
-                                 avro_schema: None,
-                                 ca_certificate_path: None,
-                             }
-                         } else {
-                             crate::schema::parse_processing_config(&schema_json).unwrap_or_default()
-                         }
+                        if schema_json.trim_start().starts_with('[') {
+                            let s = crate::schema::parse_simple_schema(&schema_json);
+                            crate::schema::ProcessingConfig {
+                                arrow_schema: s,
+                                format: crate::schema::DataFormat::Json,
+                                avro_schema: None,
+                                protobuf_descriptor: None,
+                                protobuf_message_name: None,
+                                ca_certificate_path: None,
+                                batch_size: None,
+                                batch_bytes: None,
+                                batch_duration_ms: None,
+                            }
+                        } else {
+                            crate::schema::parse_processing_config(&schema_json).unwrap_or_default()
+                        }
                     } else {
                         crate::schema::ProcessingConfig::default()
                     };
-                    
+
                     (c.value().clone(), cfg)
                 } else {
-                    log::info!("Rust: Creating new PubSubClient for partition {}", partition_id);
+                    log::info!(
+                        "Rust: Creating new PubSubClient for partition {}",
+                        partition_id
+                    );
                     let cfg = if !schema_json.is_empty() {
                         if schema_json.trim_start().starts_with('[') {
-                             let s = crate::schema::parse_simple_schema(&schema_json);
-                             crate::schema::ProcessingConfig {
-                                 arrow_schema: s,
-                                 format: crate::schema::DataFormat::Json,
-                                 avro_schema: None,
-                                 ca_certificate_path: None,
-                             }
+                            let s = crate::schema::parse_simple_schema(&schema_json);
+                            crate::schema::ProcessingConfig {
+                                arrow_schema: s,
+                                format: crate::schema::DataFormat::Json,
+                                avro_schema: None,
+                                protobuf_descriptor: None,
+                                protobuf_message_name: None,
+                                ca_certificate_path: None,
+                                batch_size: None,
+                                batch_bytes: None,
+                                batch_duration_ms: None,
+                            }
                         } else {
                             match crate::schema::parse_processing_config(&schema_json) {
                                 Ok(c) => c,
@@ -155,15 +197,21 @@ mod source_jni {
 
                     let rt = crate::core::runtime::get_runtime();
                     let client_res = rt.block_on(async {
-                        crate::core::client::PubSubClient::new(&project_id, &subscription_id, cfg.ca_certificate_path.as_deref()).await
+                        crate::core::client::PubSubClient::new(
+                            &project_id,
+                            &subscription_id,
+                            cfg.ca_certificate_path.as_deref(),
+                        )
+                        .await
                     });
 
                     match client_res {
                         Ok(c) => {
                             let shared_client = std::sync::Arc::new(c);
-                            crate::core::client::CLIENT_REGISTRY.insert(partition_id, shared_client.clone());
+                            crate::core::client::CLIENT_REGISTRY
+                                .insert(partition_id, shared_client.clone());
                             (shared_client, cfg)
-                        },
+                        }
                         Err(e) => {
                             let err_msg = format!("Rust: PubSubClient::new failed: {}", e);
                             log::error!("{}", err_msg);
@@ -176,29 +224,41 @@ mod source_jni {
                 let reader = Box::new(crate::RustPartitionReader {
                     rt: crate::core::runtime::get_runtime(),
                     client,
-                    schema: config.arrow_schema,
-                    format: config.format,
-                    avro_schema: config.avro_schema,
+                    config,
                     partition_id,
                 });
                 Box::into_raw(reader) as jlong
             })
         }
 
-        pub extern "jni" fn getNextBatch(self, _env: &JNIEnv, reader_ptr: jlong, batch_id: String, arrow_array_addr: jlong, arrow_schema_addr: jlong, max_messages: i32, wait_ms: jlong) -> i32 {
+        pub extern "jni" fn getNextBatch(
+            self,
+            _env: &JNIEnv,
+            reader_ptr: jlong,
+            batch_id: String,
+            arrow_array_addr: jlong,
+            arrow_schema_addr: jlong,
+            max_messages: i32,
+            wait_ms: jlong,
+        ) -> i32 {
             crate::safe_jni_call(-100, || {
-                if reader_ptr == 0 { return -1; }
+                if reader_ptr == 0 {
+                    return -1;
+                }
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
-                crate::diagnostics::logging::set_context(&format!("[P: {}, B: {}]", reader.partition_id, batch_id));
+                crate::diagnostics::logging::set_context(&format!(
+                    "[P: {}, B: {}]",
+                    reader.partition_id, batch_id
+                ));
 
                 {
                     let unacked = crate::source::ACK_HANDLE_MAP.len();
                     // Increased limit to 1,000,000 to accommodate 12-24 partitions (which can pull 20k each)
                     // without hitting a deadlock before the first commit.
 
-                    if unacked >= 1_000 {
-                         log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure (returning 0 messages).", unacked);
-                         return 0; 
+                    if unacked >= 100_000 {
+                        log::warn!("Rust: ACK_HANDLE_MAP limit reached ({}). Applying backpressure (returning 0 messages).", unacked);
+                        return 0;
                     }
                     log::info!("Rust: getNextBatch called for part={} batch={}. Max={}, Wait={}ms. Unacked={}", 
                         reader.partition_id, batch_id, max_messages, wait_ms, unacked);
@@ -206,18 +266,29 @@ mod source_jni {
 
                 let start_time = std::time::Instant::now();
 
-
-                let messages = match reader.rt.block_on(async { reader.client.fetch_batch(max_messages as usize, wait_ms as u64).await }) {
+                let messages = match reader.rt.block_on(async {
+                    reader
+                        .client
+                        .fetch_batch(max_messages as usize, wait_ms as u64)
+                        .await
+                }) {
                     Ok(msgs) => {
                         if !msgs.is_empty() {
-                            log::info!("Rust: fetch_batch returned {} messages for part={} after {}ms", 
-                                msgs.len(), reader.partition_id, start_time.elapsed().as_millis());
+                            log::info!(
+                                "Rust: fetch_batch returned {} messages for part={} after {}ms",
+                                msgs.len(),
+                                reader.partition_id,
+                                start_time.elapsed().as_millis()
+                            );
                         } else {
-                            log::debug!("Rust: fetch_batch timeout/empty for part={} after {}ms", 
-                                reader.partition_id, start_time.elapsed().as_millis());
+                            log::debug!(
+                                "Rust: fetch_batch timeout/empty for part={} after {}ms",
+                                reader.partition_id,
+                                start_time.elapsed().as_millis()
+                            );
                         }
                         msgs
-                    },
+                    }
                     Err(e) => {
                         log::error!("Rust: fetch_batch failed: {:?}", e);
                         return -2;
@@ -228,11 +299,7 @@ mod source_jni {
                     return 0;
                 }
 
-                let mut builder = crate::schema::builder::ArrowBatchBuilder::new(
-                    reader.schema.clone(),
-                    reader.format,
-                    reader.avro_schema.clone()
-                );
+                let mut builder = crate::schema::builder::ArrowBatchBuilder::new(&reader.config);
 
                 let mut ack_ids = Vec::with_capacity(messages.len());
                 let mut total_bytes = 0usize;
@@ -244,7 +311,7 @@ mod source_jni {
                     }
                     builder.append(msg);
                     ack_ids.push(msg.ack_id.clone());
-                    
+
                     if total_bytes >= byte_threshold {
                         log::info!("Rust: Batch byte threshold reached ({} bytes). Stopping ingestion for this batch.", total_bytes);
                         break;
@@ -257,16 +324,23 @@ mod source_jni {
                 }
 
                 let (arrays, schema) = builder.finish();
-                let batch = match arrow::record_batch::RecordBatch::try_new(schema.clone(), arrays.clone()) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        let row_counts: Vec<usize> = arrays.iter().map(|a| a.len()).collect();
-                        let names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
-                        log::error!("Rust: RecordBatch::try_new failed: {}. Fields: {:?}, RowCounts: {:?}", e, names, row_counts);
-                        eprintln!("Rust: RecordBatch::try_new failed: {}. Fields: {:?}, RowCounts: {:?}", e, names, row_counts);
-                        return -5;
-                    }
-                };
+                let batch =
+                    match arrow::record_batch::RecordBatch::try_new(schema.clone(), arrays.clone())
+                    {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let row_counts: Vec<usize> = arrays.iter().map(|a| a.len()).collect();
+                            let names: Vec<String> =
+                                schema.fields().iter().map(|f| f.name().clone()).collect();
+                            log::error!(
+                            "Rust: RecordBatch::try_new failed: {}. Fields: {:?}, RowCounts: {:?}",
+                            e,
+                            names,
+                            row_counts
+                        );
+                            return -5;
+                        }
+                    };
                 let struct_array = StructArray::from(batch);
 
                 unsafe {
@@ -278,10 +352,10 @@ mod source_jni {
 
                             std::ptr::write(guard.array, ffi_array);
                             std::ptr::write(guard.schema, ffi_schema);
-                        },
+                        }
                         Err(e) => {
-                             log::error!("Rust: FFI Guard failed during read export: {}", e);
-                             return -3;
+                            log::error!("Rust: FFI Guard failed during read export: {}", e);
+                            return -3;
                         }
                     }
                 }
@@ -290,12 +364,22 @@ mod source_jni {
             })
         }
 
-        pub extern "jni" fn acknowledge(self, _env: &JNIEnv, reader_ptr: jlong, ack_ids: Vec<String>) -> i32 {
+        pub extern "jni" fn acknowledge(
+            self,
+            _env: &JNIEnv,
+            reader_ptr: jlong,
+            ack_ids: Vec<String>,
+        ) -> i32 {
             crate::safe_jni_call(-100, || {
-                if reader_ptr == 0 { return -1; }
+                if reader_ptr == 0 {
+                    return -1;
+                }
                 let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
 
-                match reader.rt.block_on(async { reader.client.acknowledge(ack_ids).await }) {
+                match reader
+                    .rt
+                    .block_on(async { reader.client.acknowledge(ack_ids).await })
+                {
                     Ok(_) => 1,
                     Err(e) => {
                         log::error!("Rust: acknowledge failed: {:?}", e);
@@ -305,9 +389,16 @@ mod source_jni {
             })
         }
 
-        pub extern "jni" fn ackCommitted(self, _env: &JNIEnv, reader_ptr: jlong, batch_ids: Vec<String>) -> i32 {
+        pub extern "jni" fn ackCommitted(
+            self,
+            _env: &JNIEnv,
+            reader_ptr: jlong,
+            batch_ids: Vec<String>,
+        ) -> i32 {
             crate::safe_jni_call(-100, || {
-                if reader_ptr == 0 { return -1; }
+                if reader_ptr == 0 {
+                    return -1;
+                }
                 let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
 
                 let mut all_ack_ids = Vec::new();
@@ -320,9 +411,14 @@ mod source_jni {
                     }
                 }
 
-                if all_ack_ids.is_empty() { return 0; }
+                if all_ack_ids.is_empty() {
+                    return 0;
+                }
 
-                match reader.rt.block_on(async { reader.client.acknowledge(all_ack_ids).await }) {
+                match reader
+                    .rt
+                    .block_on(async { reader.client.acknowledge(all_ack_ids).await })
+                {
                     Ok(_) => 1,
                     Err(e) => {
                         log::error!("Rust: ackCommitted failed: {:?}", e);
@@ -333,45 +429,31 @@ mod source_jni {
         }
 
         pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
-            crate::safe_jni_call(0, || {
-                crate::source::ACK_HANDLE_MAP.len() as i32
-            })
+            crate::safe_jni_call(0, || crate::source::ACK_HANDLE_MAP.len() as i32)
         }
 
         pub extern "jni" fn getNativeMemoryUsageNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_buffered_bytes() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_buffered_bytes() as i64)
         }
 
         pub extern "jni" fn getIngestedBytesNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_ingested_bytes() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_ingested_bytes() as i64)
         }
 
         pub extern "jni" fn getIngestedMessagesNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_ingested_messages() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_ingested_messages() as i64)
         }
 
         pub extern "jni" fn getReadErrorsNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_read_errors() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_read_errors() as i64)
         }
 
         pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_retry_count() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_retry_count() as i64)
         }
 
         pub extern "jni" fn getAckLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_ack_latency_micros() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_ack_latency_micros() as i64)
         }
 
         /// Closes the native reader and releases all associated resources.
@@ -381,8 +463,12 @@ mod source_jni {
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
-                    let reader = unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
-                    log::info!("Rust: NativeReader.close called for partition {}", reader.partition_id);
+                    let reader =
+                        unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
+                    log::info!(
+                        "Rust: NativeReader.close called for partition {}",
+                        reader.partition_id
+                    );
                     crate::source::cleanup_partition(reader.partition_id, None);
                 }
             })
@@ -393,11 +479,13 @@ mod source_jni {
 #[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
 #[bridge]
 mod sink_jni {
-    use robusta_jni::convert::{Signature, IntoJavaValue, FromJavaValue, TryIntoJavaValue, TryFromJavaValue};
-    use robusta_jni::jni::JNIEnv;
+    use arrow::array::StructArray;
+    use robusta_jni::convert::{
+        FromJavaValue, IntoJavaValue, Signature, TryFromJavaValue, TryIntoJavaValue,
+    };
     use robusta_jni::jni::objects::AutoLocal;
     use robusta_jni::jni::sys::jlong;
-    use arrow::array::StructArray;
+    use robusta_jni::jni::JNIEnv;
 
     /// JNI wrapper for `NativeWriter` on the Scala side.
     #[derive(Signature, TryIntoJavaValue, IntoJavaValue, TryFromJavaValue, FromJavaValue)]
@@ -408,17 +496,57 @@ mod sink_jni {
     }
 
     impl<'env: 'borrow, 'borrow> NativeWriter<'env, 'borrow> {
-        pub extern "jni" fn init(self, _env: &JNIEnv, project_id: String, topic_id: String, ca_certificate_path: String, partition_id: i32) -> jlong {
+        pub extern "jni" fn init(
+            self,
+            _env: &JNIEnv,
+            project_id: String,
+            topic_id: String,
+            ca_certificate_path: String,
+            config_json: String,
+            partition_id: i32,
+        ) -> jlong {
             crate::safe_jni_call(0, || {
                 crate::diagnostics::logging::init(_env);
                 crate::diagnostics::logging::set_context(&format!("[Sink P: {}]", partition_id));
-                log::info!("Rust: NativeWriter.init called for project: {}, topic: {}", project_id, topic_id);
+                log::info!(
+                    "Rust: NativeWriter.init called for project: {}, topic: {}",
+                    project_id,
+                    topic_id
+                );
 
                 let rt = crate::core::runtime::get_runtime();
-                let ca_path = if ca_certificate_path.is_empty() { None } else { Some(ca_certificate_path.as_str()) };
+                let ca_path = if ca_certificate_path.is_empty() {
+                    None
+                } else {
+                    Some(ca_certificate_path.as_str())
+                };
+
+                // Parse config
+                let config = if !config_json.is_empty() {
+                    match crate::schema::parse_processing_config(&config_json) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            log::warn!(
+                                "Rust: Failed to parse writer config: {}. Using default.",
+                                e
+                            );
+                            crate::schema::ProcessingConfig::default()
+                        }
+                    }
+                } else {
+                    crate::schema::ProcessingConfig::default()
+                };
 
                 let client_res = rt.block_on(async {
-                    crate::sink::PublisherClient::new(&project_id, &topic_id, ca_path).await
+                    crate::sink::PublisherClient::new(
+                        &project_id,
+                        &topic_id,
+                        ca_path,
+                        config.batch_size,
+                        config.batch_bytes,
+                        config.batch_duration_ms,
+                    )
+                    .await
                 });
 
                 match client_res {
@@ -427,9 +555,10 @@ mod sink_jni {
                             rt,
                             client: c,
                             partition_id,
+                            config,
                         });
                         Box::into_raw(writer) as jlong
-                    },
+                    }
                     Err(e) => {
                         log::error!("Rust: Failed to define publisher: {:?}", e);
                         0
@@ -438,12 +567,23 @@ mod sink_jni {
             })
         }
 
-        pub extern "jni" fn writeBatch(self, _env: &JNIEnv, writer_ptr: jlong, arrow_array_addr: jlong, arrow_schema_addr: jlong) -> i32 {
+        pub extern "jni" fn writeBatch(
+            self,
+            _env: &JNIEnv,
+            writer_ptr: jlong,
+            arrow_array_addr: jlong,
+            arrow_schema_addr: jlong,
+        ) -> i32 {
             crate::safe_jni_call(-100, || {
-                if writer_ptr == 0 { return -1; }
+                if writer_ptr == 0 {
+                    return -1;
+                }
                 let writer = unsafe { &mut *(writer_ptr as *mut crate::RustPartitionWriter) };
-                crate::diagnostics::logging::set_context(&format!("[Sink P: {}]", writer.partition_id));
-                
+                crate::diagnostics::logging::set_context(&format!(
+                    "[Sink P: {}]",
+                    writer.partition_id
+                ));
+
                 unsafe {
                     let guard = match crate::FFIGuard::new(arrow_array_addr, arrow_schema_addr) {
                         Ok(g) => g,
@@ -453,28 +593,35 @@ mod sink_jni {
                         }
                     };
 
-                    let array_data = match arrow::ffi::from_ffi(std::ptr::read(guard.array), &std::ptr::read(guard.schema)) {
+                    let array_data = match arrow::ffi::from_ffi(
+                        std::ptr::read(guard.array),
+                        &std::ptr::read(guard.schema),
+                    ) {
                         Ok(data) => data,
                         Err(e) => {
                             log::error!("Rust: FFI Import failed: {:?}", e);
                             return -3;
                         }
                     };
-                    
+
                     let array = StructArray::from(array_data);
-                    let reader = crate::schema::reader::ArrowBatchReader::new(&array);
+                    let reader = crate::schema::reader::ArrowBatchReader::new(
+                        &array,
+                        writer.config.format,
+                        writer.config.avro_schema.clone(),
+                    );
                     let msgs = match reader.to_pubsub_messages() {
-                         Ok(m) => m,
-                         Err(e) => {
-                             log::error!("Rust: Failed to convert batch to PubsubMessages: {:?}", e);
-                             return -4;
-                         }
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Rust: Failed to convert batch to PubsubMessages: {:?}", e);
+                            return -4;
+                        }
                     };
 
-                    let res = writer.rt.block_on(async {
-                         writer.client.publish_batch(msgs).await
-                    });
-                    
+                    let res = writer
+                        .rt
+                        .block_on(async { writer.client.publish_batch(msgs).await });
+
                     if let Err(e) = res {
                         log::error!("Rust: Failed to publish batch: {:?}", e);
                         return -5;
@@ -485,27 +632,19 @@ mod sink_jni {
         }
 
         pub extern "jni" fn getPublishedBytesNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_published_bytes() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_published_bytes() as i64)
         }
 
         pub extern "jni" fn getPublishedMessagesNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_published_messages() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_published_messages() as i64)
         }
 
         pub extern "jni" fn getWriteErrorsNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_write_errors() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_write_errors() as i64)
         }
 
         pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
-            crate::safe_jni_call(0, || {
-                crate::core::metrics::get_retry_count() as i64
-            })
+            crate::safe_jni_call(0, || crate::core::metrics::get_retry_count() as i64)
         }
 
         pub extern "jni" fn getPublishLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
@@ -514,10 +653,16 @@ mod sink_jni {
             })
         }
 
-        pub extern "jni" fn close(self, _env: &JNIEnv, writer_ptr: jlong, timeout_ms: jlong) -> i32 {
+        pub extern "jni" fn close(
+            self,
+            _env: &JNIEnv,
+            writer_ptr: jlong,
+            timeout_ms: jlong,
+        ) -> i32 {
             crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
-                    let writer = unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
+                    let writer =
+                        unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
                     let flush_res = writer.rt.block_on(async {
                         let timeout = if timeout_ms > 0 {
                             std::time::Duration::from_millis(timeout_ms as u64)
@@ -542,9 +687,7 @@ mod sink_jni {
 pub struct RustPartitionReader {
     rt: &'static Runtime,
     client: std::sync::Arc<crate::core::client::PubSubClient>,
-    schema: Option<arrow::datatypes::SchemaRef>,
-    format: crate::schema::DataFormat,
-    avro_schema: Option<apache_avro::Schema>,
+    config: crate::schema::ProcessingConfig,
     partition_id: i32,
 }
 
@@ -552,4 +695,5 @@ pub struct RustPartitionWriter {
     rt: &'static Runtime,
     client: crate::sink::PublisherClient,
     partition_id: i32,
+    config: crate::schema::ProcessingConfig,
 }

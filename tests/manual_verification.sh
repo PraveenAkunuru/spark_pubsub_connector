@@ -78,6 +78,8 @@ export PUBSUB_NUM_PARTITIONS="2"
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
 export LD_LIBRARY_PATH="/usr/local/google/home/pakunuru/spark_pubsub_connector/native/target/release:$LD_LIBRARY_PATH"
+export RUST_LOG=debug
+export PUBSUB_EMULATOR_HOST=localhost:8088
 
 $JAVA_HOME/bin/java $JPMS_FLAGS -Xmx4g \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \

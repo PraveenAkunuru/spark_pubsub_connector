@@ -63,6 +63,11 @@ The JAR contains native binaries for Linux (x86_64). The connector automatically
 - **Cause**: Service Account missing permissions or ADC not initialized.
 - **Fix**: Run `gcloud auth application-default login` for local dev, or check IAM roles in GCP Console.
 
+### 4.3. Large Message Stalls (>10KB)
+- **Symptom**: Throughput drops to 0 or job stalls.
+- **Cause**: Batch sizes exceeding Pub/Sub's 10MB hard limit per request.
+- **Fix**: Set `batchSize` to smaller values (e.g., 500-1000) using `.option("batchSize", "500")`. This logic is now adaptive, but manual tuning helps for edge cases.
+
 ---
 
 ## 5. Future Roadmap

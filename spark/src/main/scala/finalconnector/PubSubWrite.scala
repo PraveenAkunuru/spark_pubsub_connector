@@ -102,7 +102,19 @@ class PubSubDataWriter(partitionId: Int, taskId: Long, schema: StructType, optio
   private val writer = new NativeWriter()
   logInfo(s"PubSubDataWriter created for $projectId/$topicId, partitionId: $partitionId, taskId: $taskId")
   
-  private val nativePtr = writer.init(projectId, topicId, caCertificatePath.getOrElse(""), partitionId)
+  private val configJson = PubSubConfig.buildProcessingConfigJson(
+    schema,
+    options.get(PubSubConfig.FORMAT_KEY),
+    options.get(PubSubConfig.AVRO_SCHEMA_KEY),
+    options.get(PubSubConfig.PROTOBUF_DESCRIPTOR_KEY),
+    options.get(PubSubConfig.PROTOBUF_MESSAGE_NAME_KEY),
+    caCertificatePath,
+    Some(batchSize), // Use capped batchSize
+    Some(maxBatchBytes), // Map maxBatchBytes to batchBytes
+    options.get(PubSubConfig.PUB_SUB_BATCH_DURATION_MS_KEY).map(_.toLong)
+  )
+
+  private val nativePtr = writer.init(projectId, topicId, caCertificatePath.getOrElse(""), configJson, partitionId)
   if (nativePtr == 0) {
     throw new RuntimeException("Failed to initialize native Pub/Sub writer.")
   }

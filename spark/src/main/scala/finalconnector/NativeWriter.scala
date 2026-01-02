@@ -25,6 +25,7 @@ class NativeWriter extends Logging {
     projectId: String, 
     topicId: String, 
     caCertificatePath: String,
+    configJson: String,
     partitionId: Int): Long
   
   /**

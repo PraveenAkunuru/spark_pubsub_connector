@@ -53,7 +53,7 @@ class PubSubTableProviderV2 extends TableProvider with DataSourceRegister with o
     
     // Fail-Fast: Verify Credentials locally on the driver to avoid distributed failures later.
     try {
-      val creds = com.google.auth.oauth2.GoogleCredentials.getApplicationDefault()
+      val _ = com.google.auth.oauth2.GoogleCredentials.getApplicationDefault()
       logInfo("Pub/Sub: Fail-Fast Auth check passed.")
     } catch {
       case e: Throwable =>
