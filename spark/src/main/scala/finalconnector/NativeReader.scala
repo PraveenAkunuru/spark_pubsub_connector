@@ -54,24 +54,63 @@ class NativeReader extends Logging {
 
   /**
    * Sends final acknowledgments for a set of committed Spark batches.
+   *
+   * @param nativePtr Pointer to the native reader object.
+   * @param batchIds  List of Spark batch IDs to acknowledge.
+   * @return 1 on success, negative error code on failure.
    */
   @native def ackCommitted(nativePtr: Long, batchIds: java.util.List[String]): Int
   
   /**
    * Checks the count of messages currently in-flight (unacked).
+   *
+   * @param nativePtr Pointer to the native reader object.
+   * @return The number of unacknowledged messages tracked by the native reader.
    */
   @native def getUnackedCount(nativePtr: Long): Int
 
   /**
    * Safely deallocates the native Rust object.
+   *
+   * @param nativePtr Pointer to the native reader object to close.
    */
   @native def close(nativePtr: Long): Unit
 
   // Metrics: Directly exported from Rust atomic counters for integration with Spark UI/MetricsSystem.
+  
+  /**
+   * Gets the current native memory usage (buffered bytes).
+   * @return Bytes currently held in the native buffer.
+   */
   @native def getNativeMemoryUsageNative(): Long
+
+  /**
+   * Gets total ingested bytes since initialization.
+   * @return Total bytes received from Pub/Sub.
+   */
   @native def getIngestedBytesNative(): Long
+
+  /**
+   * Gets total ingested messages since initialization.
+   * @return Total messages received from Pub/Sub.
+   */
   @native def getIngestedMessagesNative(): Long
+
+  /**
+   * Gets total read errors encountered.
+   * @return Count of read errors (e.g., gRPC failures).
+   */
   @native def getReadErrorsNative(): Long
+
+  /**
+   * Gets total retry attempts made by the client.
+   * @return Count of retries.
+   */
   @native def getRetryCountNative(): Long
+
+  /**
+   * Gets the average acknowledgment latency in microseconds.
+   * @return Average latency in micros.
+   */
   @native def getAckLatencyMicrosNative(): Long
 }

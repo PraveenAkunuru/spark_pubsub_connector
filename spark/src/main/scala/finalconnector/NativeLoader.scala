@@ -26,6 +26,8 @@ object NativeLoader {
    *
    * This method is typically called in the static initializer or class body 
    * of classes that define JNI methods (e.g., NativeReader, NativeWriter).
+   *
+   * @throws UnsatisfiedLinkError if the library cannot be found in system path or extracted from JAR.
    */
   def load(): Unit = synchronized {
     if (!loaded) {
