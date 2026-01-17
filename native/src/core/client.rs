@@ -37,6 +37,13 @@ impl PubSubClient {
     /// * `project_id` - GCP Project ID.
     /// * `subscription_id` - Subscription ID or full resource name.
     /// * `_ca_path` - Optional path to CA certificates (reserved for private environments).
+    ///
+    /// # Returns
+    /// * `Ok(PubSubClient)` - A new client instance with an active background puller.
+    ///
+    /// # Errors
+    /// * Returns error if the Pub/Sub client cannot be created (e.g., auth failure).
+    /// * Returns error if the subscription does not exist or cannot be accessed.
     pub async fn new(
         project_id: &str,
         subscription_id: &str,
@@ -142,6 +149,16 @@ impl PubSubClient {
     /// Fetches a batch of messages from the internal buffer.
     ///
     /// Blocks until `max_messages` are received or `wait_ms` expires.
+    ///
+    /// # Arguments
+    /// * `max_messages` - Maximum number of messages to retrieve.
+    /// * `wait_ms` - Maximum time to wait in milliseconds.
+    ///
+    /// # Returns
+    /// * `Ok(Vec<LowLevelMessage>)` - A vector of messages (may be fewer than `max_messages`).
+    ///
+    /// # Errors
+    /// * Currently does not return errors, but returns a Result for future compatibility.
     pub async fn fetch_batch(
         &self,
         max_messages: usize,
@@ -186,6 +203,15 @@ impl PubSubClient {
     ///
     /// This removes the handles from the global `ACK_HANDLE_MAP` and triggers
     /// the asynchronous acknowledgment call to the Pub/Sub service.
+    ///
+    /// # Arguments
+    /// * `ack_ids` - A list of AckIds to acknowledge.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the acknowledgment request was successfully queued.
+    ///
+    /// # Errors
+    /// * Currently does not return errors, but returns a Result for future compatibility.
     pub async fn acknowledge(
         &self,
         ack_ids: Vec<String>,

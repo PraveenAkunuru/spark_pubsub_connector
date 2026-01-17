@@ -32,6 +32,16 @@ struct FFIGuard {
 
 impl FFIGuard {
     /// Validates that FFI pointers are non-null and properly aligned.
+    ///
+    /// # Arguments
+    /// * `array` - Raw pointer address for Arrow Array.
+    /// * `schema` - Raw pointer address for Arrow Schema.
+    ///
+    /// # Returns
+    /// * `Ok(FFIGuard)` - Validated guard wrapping the mutable raw pointers.
+    ///
+    /// # Errors
+    /// * Returns Err if pointers are null or misaligned.
     unsafe fn new(array: jlong, schema: jlong) -> Result<Self, &'static str> {
         if array == 0 || schema == 0 {
             return Err("Received NULL pointer for Arrow FFI");
@@ -103,6 +113,21 @@ mod source_jni {
     }
 
     impl<'env: 'borrow, 'borrow> NativeReader<'env, 'borrow> {
+        /// Initializes a native partition reader.
+        ///
+        /// # Arguments
+        /// * `env` - The JNI environment.
+        /// * `project_id` - GCP Project ID.
+        /// * `subscription_id` - Subscription ID.
+        /// * `jitter_millis` - Random startup delay to prevent thundering herd.
+        /// * `schema_json` - JSON representation of the schema.
+        /// * `partition_id` - Spark partition index.
+        ///
+        /// # Returns
+        /// * `jlong` - Pointer to the heap-allocated `RustPartitionReader`. 0 on failure.
+        ///
+        /// # Exceptions
+        /// * Throws `java/lang/RuntimeException` if initialization fails.
         pub extern "jni" fn init(
             self,
             env: &JNIEnv,
@@ -231,6 +256,24 @@ mod source_jni {
             })
         }
 
+        /// Fetches the next batch of messages.
+        ///
+        /// # Arguments
+        /// * `env` - JNI Env.
+        /// * `reader_ptr` - Pointer to `RustPartitionReader`.
+        /// * `batch_id` - Batch Identifier.
+        /// * `arrow_array_addr` - Address of `FFI_ArrowArray`.
+        /// * `arrow_schema_addr` - Address of `FFI_ArrowSchema`.
+        /// * `max_messages` - Limit on count.
+        /// * `wait_ms` - Timeout in ms.
+        ///
+        /// # Returns
+        /// * `i32` - 1 on success, 0 on empty/backpressure, negative on error.
+        ///
+        /// # Errors
+        /// * Returns -1 if pointer is null.
+        /// * Returns -2 if fetch fails.
+        /// * Returns -3 if FFI guard fails.
         pub extern "jni" fn getNextBatch(
             self,
             _env: &JNIEnv,
@@ -366,6 +409,14 @@ mod source_jni {
             })
         }
 
+        /// Acknowledges messages by ID.
+        ///
+        /// # Arguments
+        /// * `reader_ptr` - Pointer to `RustPartitionReader`.
+        /// * `ack_ids` - List of Ack IDs.
+        ///
+        /// # Returns
+        /// * `i32` - 1 on success, negative on error.
         pub extern "jni" fn acknowledge(
             self,
             _env: &JNIEnv,
@@ -392,6 +443,14 @@ mod source_jni {
             })
         }
 
+        /// Acknowledges all messages associated with committed batch IDs.
+        ///
+        /// # Arguments
+        /// * `reader_ptr` - Pointer to `RustPartitionReader`.
+        /// * `batch_ids` - List of committed Batch IDs.
+        ///
+        /// # Returns
+        /// * `i32` - 1 on success, negative on error.
         pub extern "jni" fn ackCommitted(
             self,
             _env: &JNIEnv,
@@ -432,30 +491,58 @@ mod source_jni {
             })
         }
 
+        /// Returns the count of unacknowledged messages.
+        ///
+        /// # Returns
+        /// * `i32` - Count of unacked messages.
         pub extern "jni" fn getUnackedCount(self, _env: &JNIEnv, _reader_ptr: jlong) -> i32 {
             crate::safe_jni_call(0, || crate::source::ACK_HANDLE_MAP.len() as i32)
         }
 
+        /// Returns the current native memory usage (buffered bytes).
+        ///
+        /// # Returns
+        /// * `i64` - Bytes used.
         pub extern "jni" fn getNativeMemoryUsageNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_buffered_bytes() as i64)
         }
 
+        /// Returns total ingested bytes.
+        ///
+        /// # Returns
+        /// * `i64` - Total bytes.
         pub extern "jni" fn getIngestedBytesNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_ingested_bytes() as i64)
         }
 
+        /// Returns total ingested messages.
+        ///
+        /// # Returns
+        /// * `i64` - Total messages.
         pub extern "jni" fn getIngestedMessagesNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_ingested_messages() as i64)
         }
 
+        /// Returns total read errors.
+        ///
+        /// # Returns
+        /// * `i64` - Error count.
         pub extern "jni" fn getReadErrorsNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_read_errors() as i64)
         }
 
+        /// Returns total retry count.
+        ///
+        /// # Returns
+        /// * `i64` - Retry count.
         pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_retry_count() as i64)
         }
 
+        /// Returns average ack latency in micros.
+        ///
+        /// # Returns
+        /// * `i64` - Latency in micros.
         pub extern "jni" fn getAckLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_ack_latency_micros() as i64)
         }
@@ -464,6 +551,12 @@ mod source_jni {
         ///
         /// This drops the `RustPartitionReader` and triggers a full cleanup of the
         /// `ACK_HANDLE_MAP` and `BATCH_ACK_MAP` for this partition to prevent memory leaks.
+        ///
+        /// # Arguments
+        /// * `reader_ptr` - Pointer to `RustPartitionReader`.
+        ///
+        /// # Returns
+        /// * None.
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
@@ -502,6 +595,16 @@ mod sink_jni {
     }
 
     impl<'env: 'borrow, 'borrow> NativeWriter<'env, 'borrow> {
+        /// Initializes a native partition writer.
+        ///
+        /// # Arguments
+        /// * `project_id` - GCP Project ID.
+        /// * `topic_id` - Target Topic ID.
+        /// * `config_json` - JSON Config.
+        /// * `partition_id` - Spark Partition ID.
+        ///
+        /// # Returns
+        /// * `jlong` - Pointer to `RustPartitionWriter`. 0 on failure.
         pub extern "jni" fn init(
             self,
             _env: &JNIEnv,
@@ -573,6 +676,15 @@ mod sink_jni {
             })
         }
 
+        /// Writes a batch of arrow data to Pub/Sub.
+        ///
+        /// # Arguments
+        /// * `writer_ptr` - Pointer to `RustPartitionWriter`.
+        /// * `arrow_array_addr` - FFI Array Address.
+        /// * `arrow_schema_addr` - FFI Schema Address.
+        ///
+        /// # Returns
+        /// * `i32` - 1 on success, negative on error.
         pub extern "jni" fn writeBatch(
             self,
             _env: &JNIEnv,
@@ -639,28 +751,56 @@ mod sink_jni {
             })
         }
 
+        /// Returns total published bytes.
+        ///
+        /// # Returns
+        /// * `i64` - Total bytes.
         pub extern "jni" fn getPublishedBytesNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_published_bytes() as i64)
         }
 
+        /// Returns total published messages.
+        ///
+        /// # Returns
+        /// * `i64` - Total messages.
         pub extern "jni" fn getPublishedMessagesNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_published_messages() as i64)
         }
 
+        /// Returns total write errors.
+        ///
+        /// # Returns
+        /// * `i64` - Error count.
         pub extern "jni" fn getWriteErrorsNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_write_errors() as i64)
         }
 
+        /// Returns total retry count.
+        ///
+        /// # Returns
+        /// * `i64` - Retry count.
         pub extern "jni" fn getRetryCountNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || crate::core::metrics::get_retry_count() as i64)
         }
 
+        /// Returns average publish latency in micros.
+        ///
+        /// # Returns
+        /// * `i64` - Latency in micros.
         pub extern "jni" fn getPublishLatencyMicrosNative(self, _env: &JNIEnv) -> i64 {
             crate::safe_jni_call(0, || {
                 crate::core::metrics::get_publish_latency_micros() as i64
             })
         }
 
+        /// Closes the writer and flushes pending messages.
+        ///
+        /// # Arguments
+        /// * `writer_ptr` - Pointer to `RustPartitionWriter`.
+        /// * `timeout_ms` - Flush timeout.
+        ///
+        /// # Returns
+        /// * `i32` - 0 on success, -1 on failure.
         pub extern "jni" fn close(
             self,
             _env: &JNIEnv,
