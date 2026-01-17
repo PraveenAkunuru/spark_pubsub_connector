@@ -151,3 +151,6 @@ sequenceDiagram
   - `native/src/lib.rs`: JNI Entry Points.
   - `native/src/core/client.rs`: Pub/Sub Client Wrapper.
   - `spark/src/main/scala/finalconnector/NativeReader.scala`: Scala JNI Definition.
+
+---
+**Transparency Note**: This project was significantly accelerated by an Agentic AI (Google DeepMind). Code and documentation contain AI-generated content verified by human engineering.

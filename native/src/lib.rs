@@ -245,6 +245,8 @@ mod source_jni {
                 if reader_ptr == 0 {
                     return -1;
                 }
+                // SAFETY: reader_ptr is a valid pointer to RustPartitionReader created in init().
+                // It stays valid until close() is called. We verify it's not null.
                 let reader = unsafe { &mut *(reader_ptr as *mut crate::RustPartitionReader) };
                 crate::diagnostics::logging::set_context(&format!(
                     "[P: {}, B: {}]",
@@ -374,6 +376,7 @@ mod source_jni {
                 if reader_ptr == 0 {
                     return -1;
                 }
+                // SAFETY: reader_ptr is a valid pointer to RustPartitionReader created in init().
                 let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
 
                 match reader
@@ -399,6 +402,7 @@ mod source_jni {
                 if reader_ptr == 0 {
                     return -1;
                 }
+                // SAFETY: reader_ptr is a valid pointer to RustPartitionReader created in init().
                 let reader = unsafe { &*(reader_ptr as *const crate::RustPartitionReader) };
 
                 let mut all_ack_ids = Vec::new();
@@ -463,6 +467,8 @@ mod source_jni {
         pub extern "jni" fn close(self, _env: &JNIEnv, reader_ptr: jlong) {
             crate::safe_jni_call((), || {
                 if reader_ptr != 0 {
+                    // SAFETY: reader_ptr is the raw pointer to RustPartitionReader created in init() via Box::into_raw.
+                    // It is guaranteed to be valid until close() consumes and drops it.
                     let reader =
                         unsafe { Box::from_raw(reader_ptr as *mut crate::RustPartitionReader) };
                     log::info!(
@@ -578,6 +584,8 @@ mod sink_jni {
                 if writer_ptr == 0 {
                     return -1;
                 }
+                // SAFETY: writer_ptr is a valid pointer to RustPartitionWriter created in init().
+                // It stays valid until close() is called. We verify it's not null.
                 let writer = unsafe { &mut *(writer_ptr as *mut crate::RustPartitionWriter) };
                 crate::diagnostics::logging::set_context(&format!(
                     "[Sink P: {}]",
@@ -661,6 +669,9 @@ mod sink_jni {
         ) -> i32 {
             crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
+                    // SAFETY: writer_ptr is the raw pointer to RustPartitionWriter created in init() via Box::into_raw.
+                    // It is guaranteed to be valid until close() consumes and drops it.
+                    // We verify it's not null before conversion.
                     let writer =
                         unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
                     let flush_res = writer.rt.block_on(async {

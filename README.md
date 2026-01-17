@@ -110,3 +110,6 @@ Run comprehensive throughput tests on Dataproc using our standardized suite:
 
 ## ⚖️ License
 Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+---
+**Transparency Note**: This project was significantly accelerated by an Agentic AI (Google DeepMind). Code and documentation contain AI-generated content verified by human engineering.

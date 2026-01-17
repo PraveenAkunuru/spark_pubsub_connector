@@ -88,3 +88,6 @@ If the Rust code panics, the JNI bridge catches it and prints a full backtrace t
 - **Scala**:
   - Run `sbt compile` to check for warnings.
   - Use `scalafmt` if configured.
+
+---
+**Transparency Note**: This project was significantly accelerated by an Agentic AI (Google DeepMind). Code and documentation contain AI-generated content verified by human engineering.
