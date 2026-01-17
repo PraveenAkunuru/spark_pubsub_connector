@@ -21,6 +21,16 @@ set -euo pipefail
 #   --help                  Show this help message
 # ==============================================================================
 
+# --- Safety & Traps ---
+cleanup() {
+  local exit_code=$?
+  if [[ $exit_code -ne 0 ]]; then
+    echo "ERROR: Script failed with exit code $exit_code" | tee -a "$LOG_DIR/error.log" 2>/dev/null || true
+  fi
+  echo "Exiting..."
+}
+trap cleanup EXIT
+
 # --- Defaults ---
 REGION="us-central1"
 EXECUTORS=4

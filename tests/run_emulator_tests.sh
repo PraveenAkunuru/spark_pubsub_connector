@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT="$(dirname "$(pwd)")"
 LOG_DIR="$REPO_ROOT/logs"

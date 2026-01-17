@@ -1,5 +1,11 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+cleanup() {
+  local exit_code=$?
+  echo "Script exited with code $exit_code. Logs: $LOG_FILE"
+}
+trap cleanup EXIT
 REPO_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
 LOG_DIR="$REPO_ROOT/logs"
 mkdir -p "$LOG_DIR"
