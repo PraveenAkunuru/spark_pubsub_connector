@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
+REPO_ROOT="$(dirname "$(pwd)")"
+LOG_DIR="$REPO_ROOT/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/emulator_tests_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to $LOG_FILE"
+
 
 EMULATOR_PORT=8085
 PROJECT_ID="spark-test-project"
@@ -101,4 +107,5 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
 cd ../spark
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -jar sbt-launch.jar "spark35/testOnly *EmulatorIntegrationTest *StructuredReadTest"
+    -jar sbt-launch.jar "spark35/testOnly *EmulatorIntegrationTest *StructuredReadTest" 2>&1 | tee "$LOG_FILE"
+

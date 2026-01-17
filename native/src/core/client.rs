@@ -49,7 +49,12 @@ impl PubSubClient {
         );
 
         // Load default config (with auth)
-        let config = ClientConfig::default().with_auth().await?;
+        let config = if std::env::var("PUBSUB_EMULATOR_HOST").is_ok() {
+            log::info!("Rust: Detected PUBSUB_EMULATOR_HOST. Disabling Auth.");
+            ClientConfig::default()
+        } else {
+            ClientConfig::default().with_auth().await?
+        };
         let client = Client::new(config).await?;
 
         let full_sub_name = if subscription_id.contains('/') {

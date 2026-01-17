@@ -24,6 +24,8 @@ class ThroughputIntegrationTest extends AnyFunSuite {
     val subscriptionId = sys.env.getOrElse("PUBSUB_SUBSCRIPTION_ID", sys.props.getOrElse("pubsub.subscription.id", "throughput-sub"))
     val targetCount = sys.env.getOrElse("PUBSUB_MSG_COUNT", sys.props.getOrElse("pubsub.msg.count", "50000")).toInt
     val payloadSize = sys.env.getOrElse("PUBSUB_PAYLOAD_SIZE", sys.props.getOrElse("pubsub.payload.size", "1024")).toInt
+    
+    println(s"DEBUG: PUBSUB_EMULATOR_HOST env var: ${sys.env.get("PUBSUB_EMULATOR_HOST")}")
 
     try {
       val df = spark.readStream

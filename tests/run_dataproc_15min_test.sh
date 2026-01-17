@@ -1,5 +1,11 @@
 #!/bin/bash
 set -e
+REPO_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
+LOG_DIR="$REPO_ROOT/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/run_dataproc_15min_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to $LOG_FILE"
+
 
 # Configuration
 PROJECT_ID="pakunuru-1119-20250930202256"
@@ -72,7 +78,8 @@ gcloud dataproc jobs submit spark \
     --jars=$GCS_JAR \
     --files=$GCS_LIB \
     --properties="spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.executor.memory=$MEMORY,spark.driver.extraLibraryPath=.,spark.executor.extraLibraryPath=." \
-    -- "$TOPIC" "$MSG_COUNT" "$MSG_SIZE"
+    -- "$TOPIC" "$MSG_COUNT" "$MSG_SIZE" 2>&1 | tee -a "$LOG_FILE"
+
 
 echo "Data Generation Complete."
 
@@ -96,7 +103,8 @@ gcloud dataproc jobs submit spark \
     --jars=$GCS_JAR \
     --files=$GCS_LIB \
     --properties="spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.executor.memory=$MEMORY,spark.memory.offHeap.enabled=true,spark.memory.offHeap.size=$OFF_HEAP,spark.executor.memoryOverhead=1g,spark.dynamicAllocation.enabled=false,spark.driver.extraLibraryPath=.,spark.executor.extraLibraryPath=.,spark.executorEnv.TRIGGER_MODE=AvailableNow,spark.pubsub.batchSize=8000,spark.pubsub.readWaitMs=2000" \
-    -- "$SUB" "$OUT_DIR" "$MSG_SIZE"
+    -- "$SUB" "$OUT_DIR" "$MSG_SIZE" 2>&1 | tee -a "$LOG_FILE"
+
 
 echo "[4/5] Benchmark Job Submitted."
 echo "Check Dataproc logs for progress."

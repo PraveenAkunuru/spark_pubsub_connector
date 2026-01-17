@@ -66,6 +66,23 @@ We've organized our documentation to help you ramp up quickly, whether you're bu
 | **Serialization** | Zero (Arrow Native) | ✅ Verified |
 
 ---
+ 
+ ## 📉 Performance Benchmarking
+ 
+ Run comprehensive throughput tests on Dataproc using our standardized suite:
+ 
+ ```bash
+ # Run full suite (generation + read benchmark)
+ ./scripts/benchmark/run_throughput_suite.sh \
+   --project <PROJECT_ID> \
+   --cluster <CLUSTER_NAME> \
+   --bucket <GCS_BUCKET> \
+   --msg-size 10240
+ ```
+ 
+ Supported options: `--executors`, `--cores`, `--volume-gb`, and `--mode` (generate/read/all).
+ 
+ ---
 
 ## ⚖️ License
 Apache License 2.0. See [LICENSE](LICENSE) for details.
