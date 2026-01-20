@@ -98,15 +98,13 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
       
       val expectedMbS = PubSubConfig.getOption(PubSubConfig.EXPECTED_THROUGHPUT_MB_S_KEY, options, spark)
         .getOrElse(PubSubConfig.DEFAULT_EXPECTED_THROUGHPUT).toInt
-      
-      val tFloor = Math.ceil(expectedMbS / 8.0).toInt
-      val pHeadroom = cores * 3
-      
-      val base = Math.max(tFloor, pHeadroom)
-      val hcn = findNextHighlyCompositeNumber(base)
-      
-      logDebug(s"Intelligent Partitioning: cores=$cores (executors=$numExecutors, coresPerExec=$coresPerExecutor), expectedMbS=$expectedMbS => base=$base, hcn=$hcn")
-      hcn
+
+      PubSubPartitioner.calculatePartitions(
+        requestedPartitions,
+        cores,
+        spark.sparkContext.defaultParallelism,
+        expectedMbS
+      )
     }
 
     // Decrement TTL for all pending commits and filter out expired ones
@@ -144,17 +142,6 @@ class PubSubMicroBatchStream(schema: StructType, options: Map[String, String], c
     new PubSubPartitionReaderFactory(schema)
   }
 
-  /**
-   * Returns the smallest Highly Composite Number greater than or equal to n.
-   * HCNs are numbers with more divisors than any smaller positive integer.
-   * They are ideal for Spark because they can be divided evenly into many smaller sizes.
-   */
-  private def findNextHighlyCompositeNumber(n: Int): Int = {
-    val hcns = Array(
-      1, 2, 4, 6, 12, 24, 36, 48, 60, 120, 180, 240, 360, 720, 840, 1260, 1680, 2520, 5040, 7560, 10080, 15120, 20160, 25200, 27720, 45360, 50400, 55440, 83160, 110880
-    )
-    hcns.find(_ >= n).getOrElse(n)
-  }
 }
 
 /**

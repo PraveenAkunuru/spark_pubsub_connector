@@ -170,7 +170,7 @@ mod tests {
         let config = parse_processing_config(json).expect("Failed to parse config with columns");
         assert_eq!(config.format, DataFormat::Json);
         assert!(config.arrow_schema.is_some());
-        
+
         let schema = config.arrow_schema.unwrap();
         assert_eq!(schema.fields().len(), 2);
         assert_eq!(schema.field(0).name(), "col1");
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(schema.field(1).name(), "col2");
         assert_eq!(schema.field(1).data_type(), &DataType::Int32);
     }
-    
+
     #[test]
     fn test_parse_processing_config_avro() {
         let json = r#"{

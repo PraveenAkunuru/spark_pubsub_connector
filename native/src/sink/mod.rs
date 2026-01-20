@@ -3,6 +3,7 @@
 //! This module provides a high-performance, asynchronous publisher for Google Cloud Pub/Sub.
 //! It handles batching, acknowledgment tracking, and throughput metrics.
 
+use futures::future::BoxFuture;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::publisher::Publisher;
@@ -13,17 +14,43 @@ use crate::core::metrics::{
     PUBLISHED_BYTES, PUBLISHED_MESSAGES, PUBLISH_LATENCY_TOTAL_MICROS, WRITE_ERRORS,
 };
 
+/// Abstraction for Google Cloud Publisher to enable mocking.
+pub trait TopicPublisher: Send + Sync {
+    /// Publishes a message and awaits the acknowledgment (including queuing).
+    fn publish(&self, message: PubsubMessage) -> BoxFuture<'static, Result<String, String>>;
+
+    /// Shuts down the publisher.
+    fn shutdown(&self) -> BoxFuture<'static, ()>;
+}
+
+/// Implementation for the real Google Cloud Publisher.
+impl TopicPublisher for Publisher {
+    fn publish(&self, message: PubsubMessage) -> BoxFuture<'static, Result<String, String>> {
+        let publisher = self.clone();
+        Box::pin(async move {
+            let awaiter = publisher.publish(message).await;
+            awaiter.get().await.map_err(|e| format!("{:?}", e))
+        })
+    }
+
+    fn shutdown(&self) -> BoxFuture<'static, ()> {
+        let publisher = self.clone();
+        Box::pin(async move {
+            publisher.shutdown().await;
+        })
+    }
+}
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 type PublishJoinHandle = tokio::task::JoinHandle<Result<Vec<String>, String>>;
 
-
 /// A client for publishing batches of messages to a Pub/Sub topic.
 #[derive(Clone)]
 pub struct PublisherClient {
     /// The underlying Google Cloud Pub/Sub publisher instance.
-    publisher: Publisher,
+    publisher: Arc<dyn TopicPublisher>,
     /// Pending tasks for flush synchronization.
     pending_tasks: Arc<Mutex<Vec<PublishJoinHandle>>>,
 }
@@ -66,7 +93,7 @@ impl PublisherClient {
         let publisher = topic.new_publisher(Some(publisher_config));
 
         Ok(Self {
-            publisher,
+            publisher: Arc::new(publisher),
             pending_tasks: Arc::new(Mutex::new(Vec::new())),
         })
     }
@@ -87,10 +114,8 @@ impl PublisherClient {
 
         for msg in messages {
             total_bytes += msg.data.len() as u64;
-            // self.publisher.publish() returns a Future<Awaiter>.
-            // We await it (fast) to queue the message and get an Awaiter for the delivery result.
-            let awaiter = self.publisher.publish(msg).await;
-            awaiters.push(awaiter.get());
+            let fut = self.publisher.publish(msg);
+            awaiters.push(fut);
         }
 
         PUBLISHED_BYTES.fetch_add(total_bytes, Ordering::Relaxed);
@@ -123,7 +148,6 @@ impl PublisherClient {
             }
         });
 
-
         // Check for finished tasks and verify success to prevent accumulation
         // Apply backpressure if too many tasks are pending
         const MAX_PENDING: usize = 5000;
@@ -139,9 +163,13 @@ impl PublisherClient {
                     match h.await {
                         Ok(Ok(ids)) => {
                             if !ids.is_empty() {
-                                log::info!("Rust: Background Batch Success. Msg Count: {}. First ID: {}", ids.len(), ids[0]);
+                                log::info!(
+                                    "Rust: Background Batch Success. Msg Count: {}. First ID: {}",
+                                    ids.len(),
+                                    ids[0]
+                                );
                             }
-                        } 
+                        }
                         Ok(Err(e)) => error = Some(format!("Background task failed: {}", e)),
                         Err(e) => error = Some(format!("Background task panic: {:?}", e)),
                     }
@@ -199,21 +227,19 @@ impl PublisherClient {
 
         for (i, join_res) in results.into_iter().enumerate() {
             match join_res {
-                Ok(task_res) => {
-                    match task_res {
-                        Ok(ids) => {
-                            if i < 3 && !ids.is_empty() {
-                                let id_msg = format!("Rust: Acked Batch {} First ID: {}", i, ids[0]);
-                                log::info!("{}", id_msg);
-                                eprintln!("{}", id_msg);
-                            }
-                            success_count += ids.len();
+                Ok(task_res) => match task_res {
+                    Ok(ids) => {
+                        if i < 3 && !ids.is_empty() {
+                            let id_msg = format!("Rust: Acked Batch {} First ID: {}", i, ids[0]);
+                            log::info!("{}", id_msg);
+                            eprintln!("{}", id_msg);
                         }
-                        Err(e) => {
-                             any_error = Some(e);
-                        }
+                        success_count += ids.len();
                     }
-                }
+                    Err(e) => {
+                        any_error = Some(e);
+                    }
+                },
                 Err(e) => {
                     any_error = Some(format!("Task panic/cancelled: {:?}", e));
                 }
@@ -226,7 +252,7 @@ impl PublisherClient {
             eprintln!("{}", err_msg);
             return Err(e);
         }
-        
+
         let success_msg = format!("Rust: Flush success. {} messages confirmed.", success_count);
         log::info!("{}", success_msg);
         eprintln!("{}", success_msg);
@@ -238,10 +264,10 @@ impl PublisherClient {
         eprintln!("Rust: PublisherClient closing...");
         log::info!("Rust: PublisherClient closing...");
         self.flush(Duration::from_secs(30)).await?;
-        
-        // Clone publisher to call shutdown (which consumes self)
-        let mut pub_clone = self.publisher.clone();
-        pub_clone.shutdown().await;
+
+        // Clone publisher to call shutdown (which consumes self) -> No longer needed for Trait
+        // Trait shutdown takes &self
+        self.publisher.shutdown().await;
 
         eprintln!("Rust: Publisher shutdown complete.");
         log::info!("Rust: Publisher shutdown complete.");
@@ -249,3 +275,88 @@ impl PublisherClient {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone)]
+    struct MockPublisher {
+        published: Arc<Mutex<Vec<PubsubMessage>>>,
+        shuts_down: Arc<Mutex<bool>>,
+    }
+
+    impl MockPublisher {
+        fn new() -> Self {
+            Self {
+                published: Arc::new(Mutex::new(Vec::new())),
+                shuts_down: Arc::new(Mutex::new(false)),
+            }
+        }
+    }
+
+    impl TopicPublisher for MockPublisher {
+        fn publish(&self, message: PubsubMessage) -> BoxFuture<'static, Result<String, String>> {
+            let published = self.published.clone();
+            Box::pin(async move {
+                published.lock().await.push(message);
+                Ok("mock-id".to_string())
+            })
+        }
+
+        fn shutdown(&self) -> BoxFuture<'static, ()> {
+            let s = self.shuts_down.clone();
+            Box::pin(async move {
+                *s.lock().await = true;
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_publish_batch_success() {
+        let mock = Arc::new(MockPublisher::new());
+        let mut client = PublisherClient {
+            publisher: mock.clone(),
+            pending_tasks: Arc::new(Mutex::new(Vec::<PublishJoinHandle>::new())),
+        };
+
+        let messages = vec![
+            PubsubMessage {
+                data: b"msg1".to_vec(),
+                ..Default::default()
+            },
+            PubsubMessage {
+                data: b"msg2".to_vec(),
+                ..Default::default()
+            },
+        ];
+
+        client
+            .publish_batch(messages)
+            .await
+            .expect("Publish batch failed");
+
+        // flush to ensure background tasks complete
+        client
+            .flush(Duration::from_secs(1))
+            .await
+            .expect("Flush failed");
+
+        let published = mock.published.lock().await;
+        assert_eq!(published.len(), 2);
+        assert_eq!(published[0].data, b"msg1");
+        assert_eq!(published[1].data, b"msg2");
+    }
+
+    #[tokio::test]
+    async fn test_close_calls_shutdown() {
+        let mock = Arc::new(MockPublisher::new());
+        let client = PublisherClient {
+            publisher: mock.clone(),
+            pending_tasks: Arc::new(Mutex::new(Vec::<PublishJoinHandle>::new())),
+        };
+
+        client.close().await.expect("Close failed");
+        assert!(*mock.shuts_down.lock().await);
+    }
+}

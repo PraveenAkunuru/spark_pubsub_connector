@@ -741,12 +741,15 @@ mod sink_jni {
                     let msg_count = msgs.len();
                     let log_msg = format!("Rust: writeBatch received {} messages", msg_count);
                     log::info!("{}", log_msg);
-                    
+
                     if msg_count == 0 {
                         eprintln!("{}", log_msg);
                     } else {
-                         let payload_log = format!("Rust: First message payload size: {} bytes", msgs[0].data.len());
-                         log::info!("{}", payload_log);
+                        let payload_log = format!(
+                            "Rust: First message payload size: {} bytes",
+                            msgs[0].data.len()
+                        );
+                        log::info!("{}", payload_log);
                     }
 
                     let res = writer
@@ -823,18 +826,19 @@ mod sink_jni {
                     // SAFETY: writer_ptr is the raw pointer...
                     let writer =
                         unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
-                    
-                    log::info!("Rust: NativeWriter.close called for partition {}", writer.partition_id);
-                    
-                    let res = writer.rt.block_on(async {
-                         writer.client.close().await
-                    });
+
+                    log::info!(
+                        "Rust: NativeWriter.close called for partition {}",
+                        writer.partition_id
+                    );
+
+                    let res = writer.rt.block_on(async { writer.client.close().await });
 
                     match res {
                         Ok(_) => 0,
                         Err(e) => {
-                             log::error!("Rust: NativeWriter close failed: {}", e);
-                             -1
+                            log::error!("Rust: NativeWriter close failed: {}", e);
+                            -1
                         }
                     }
                 } else {
