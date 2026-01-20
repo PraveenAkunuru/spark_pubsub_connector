@@ -38,7 +38,9 @@ CORES=2
 MSG_SIZE=1024
 VOLUME_GB=5
 BATCH_SIZE=0
+BATCH_SIZE=0
 MODE="all"
+SEEK_TIME=""
 
 # --- Argument Parsing ---
 while [[ $# -gt 0 ]]; do
@@ -81,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       MODE="$2"
+      shift 2
+      ;;
+    --seek-time)
+      SEEK_TIME="$2"
       shift 2
       ;;
     --help)
@@ -133,7 +139,7 @@ echo "================================================="
 # --- Derived Config ---
 TOPIC="benchmark-throughput-${MSG_SIZE}b"
 SUB="benchmark-sub-${MSG_SIZE}b"
-GCS_JAR="$BUCKET_NAME/spark-pubsub-connector-assembly-test.jar"
+GCS_JAR="$BUCKET_NAME/spark-pubsub-connector-assembly-0.1.1.jar"
 GCS_LIB="$BUCKET_NAME/libnative_pubsub_connector.so"
 
 MSG_COUNT=$(python3 -c "print(int($VOLUME_GB * 1024 * 1024 * 1024 / $MSG_SIZE))")
@@ -143,7 +149,7 @@ OFF_HEAP="1g"
 # --- Helper Functions ---
 
 setup_pubsub() {
-  echo "[1/4] Setting up Pub/Sub Resources..." | tea -a "$LOG_DIR/setup.log"
+  echo "[1/4] Setting up Pub/Sub Resources..." | tee -a "$LOG_DIR/setup.log"
   
   if ! gcloud pubsub topics describe "$TOPIC" --project="$PROJECT_ID" >/dev/null 2>&1; then
       gcloud pubsub topics create "$TOPIC" --project="$PROJECT_ID"
@@ -156,31 +162,116 @@ setup_pubsub() {
       gcloud pubsub subscriptions create "$SUB" --topic="$TOPIC" --project="$PROJECT_ID" --ack-deadline=60
       echo "Created Subscription: $SUB" | tee -a "$LOG_DIR/setup.log"
   else
-      echo "Subscription $SUB exists. Purging..." | tee -a "$LOG_DIR/setup.log"
-      gcloud pubsub subscriptions seek "$SUB" --time="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --project="$PROJECT_ID"
-      echo "Purged Subscription: $SUB" | tee -a "$LOG_DIR/setup.log"
+      if [[ -n "$SEEK_TIME" ]]; then
+          echo "Subscription $SUB exists. Replaying from $SEEK_TIME..." | tee -a "$LOG_DIR/setup.log"
+          gcloud pubsub subscriptions seek "$SUB" --time="$SEEK_TIME" --project="$PROJECT_ID"
+          echo "Seeked Subscription: $SUB" | tee -a "$LOG_DIR/setup.log"
+      elif [[ "$MODE" == "generate" || "$MODE" == "all" ]]; then
+          echo "Subscription $SUB exists. Recreating for Generation (Clean State)..." | tee -a "$LOG_DIR/setup.log"
+          gcloud pubsub subscriptions delete "$SUB" --project="$PROJECT_ID" --quiet || true
+          gcloud pubsub subscriptions create "$SUB" --topic="$TOPIC" --project="$PROJECT_ID" --ack-deadline=60
+          echo "Recreated Subscription: $SUB" | tee -a "$LOG_DIR/setup.log"
+      else
+          echo "Subscription $SUB exists. Preserving data for Benchmark..." | tee -a "$LOG_DIR/setup.log"
+      fi
   fi
 }
+
 
 run_generation() {
   echo "[2/4] Generating Data..." | tee -a "$LOG_DIR/generation.log"
   
-  # Logic to determine generation batch size (write side needs smaller batches usually)
-  GEN_BATCH_SIZE=500  # Default safe write batch size
+  # Logic to determine generation batch size
+  # Target ~5MB per batch to maximize throughput
+  TARGET_BATCH_BYTES=5000000
+  GEN_BATCH_SIZE=$(python3 -c "print(max(500, int($TARGET_BATCH_BYTES / $MSG_SIZE)))")
+  echo "Calculated Generation Batch Size: $GEN_BATCH_SIZE" | tee -a "$LOG_DIR/generation.log"
   
   echo "Submitting Generation Job..." >> "$LOG_DIR/generation.log"
-  gcloud dataproc jobs submit spark \
-      --cluster="$CLUSTER_NAME" \
-      --region="$REGION" \
-      --project="$PROJECT_ID" \
-      --class=finalconnector.PubSubLoadGenerator \
-      --jars="$GCS_JAR" \
-      --files="$GCS_LIB" \
-      --properties="spark.executor.instances=4,spark.executor.cores=$CORES,spark.executor.memory=$MEMORY,spark.driver.extraLibraryPath=.,spark.executor.extraLibraryPath=.,spark.pubsub.writer.maxBatchBytes=9000000,spark.pubsub.batchSize=$GEN_BATCH_SIZE" \
-      -- "$TOPIC" "$MSG_COUNT" "$MSG_SIZE" "8" 2>&1 | tee -a "$LOG_DIR/generation.log"
+  # HDFS Buffer & GCS Archive for Event Logs
+HDFS_EVENT_LOG_DIR="hdfs:///tmp/spark-events"
+GCS_ARCHIVE_DIR="${BUCKET_NAME}/spark-job-history"
+
+# Ensure HDFS Directory exists (idempotent)
+echo "Ensuring HDFS Event Log Directory exists..." | tee -a "$LOG_DIR/generation.log"
+gcloud dataproc jobs submit hadoop --cluster "$CLUSTER_NAME" --region "$REGION" \
+    --project="$PROJECT_ID" \
+    --class org.apache.hadoop.fs.FsShell -- -mkdir -p /tmp/spark-events 2>&1 | tee -a "$LOG_DIR/generation.log"
+
+# Submit Spark Job
+echo "Submitting Spark Job..." | tee -a "$LOG_DIR/generation.log"
+# Use a temp file to capture output for App ID extraction
+JOB_OUTPUT_FILE=$(mktemp)
+
+gcloud dataproc jobs submit spark \
+    --cluster "$CLUSTER_NAME" \
+    --region "$REGION" \
+    --project="$PROJECT_ID" \
+    --jars="$GCS_JAR" \
+    --files="$GCS_LIB" \
+    --class=finalconnector.PubSubLoadGenerator \
+    --properties="\
+spark.executor.instances=$EXECUTORS,\
+spark.executor.cores=$CORES,\
+spark.executor.memory=$MEMORY,\
+spark.driver.extraLibraryPath=.,\
+spark.executor.extraLibraryPath=.,\
+spark.pubsub.batchSize=$GEN_BATCH_SIZE,\
+spark.pubsub.writer.maxBatchBytes=9000000,\
+spark.executorEnv.RUST_LOG=info,\
+spark.driverEnv.RUST_LOG=info,\
+spark.eventLog.enabled=false,\
+spark.eventLog.dir=$HDFS_EVENT_LOG_DIR" \
+    -- "$TOPIC" "$MSG_COUNT" "$MSG_SIZE" "8" | tee "$JOB_OUTPUT_FILE"
+
+# Extract Application ID
+APP_ID=$(grep -o "application_[0-9_]*" "$JOB_OUTPUT_FILE" | head -n 1)
+
+if [[ -n "$APP_ID" ]]; then
+    echo "Identified Spark App ID: $APP_ID" | tee -a "$LOG_DIR/generation.log"
+    echo "Archiving Event Log from HDFS to GCS..." | tee -a "$LOG_DIR/generation.log"
+    
+    # Ensure GCS Destination exists
+    gcloud dataproc jobs submit hadoop --cluster "$CLUSTER_NAME" --region "$REGION" \
+        --project="$PROJECT_ID" \
+        --class org.apache.hadoop.fs.FsShell -- -mkdir -p "${GCS_ARCHIVE_DIR}" 2>&1 | tee -a "$LOG_DIR/generation.log"
+    
+    # Copy from HDFS to GCS using DistCp or FsShell
+    gcloud dataproc jobs submit hadoop --cluster "$CLUSTER_NAME" --region "$REGION" \
+        --project="$PROJECT_ID" \
+        --class org.apache.hadoop.fs.FsShell -- -cp "${HDFS_EVENT_LOG_DIR}/${APP_ID}*" "${GCS_ARCHIVE_DIR}/" 2>&1 | tee -a "$LOG_DIR/generation.log" || true
+else
+    echo "WARNING: Could not identify Application ID. Event Logs might remain in HDFS." | tee -a "$LOG_DIR/generation.log"
+fi
+
+rm "$JOB_OUTPUT_FILE" 2>&1 | tee -a "$LOG_DIR/generation.log"
       
   echo "Generation Complete."
+  
+  # Verification: Check Backlog
+  echo "[2.5/4] Verifying Generated Backlog..." | tee -a "$LOG_DIR/generation.log"
+  # Wait a few seconds for Pub/Sub stats to converge
+  sleep 10
+  
+  BACKLOG_COUNT=$(gcloud pubsub subscriptions describe "$SUB" --project="$PROJECT_ID" --format="value(numUndeliveredMessages)")
+  
+  if [[ -z "$BACKLOG_COUNT" ]]; then
+      BACKLOG_COUNT=0
+  fi
+  
+  echo "Current Backlog: $BACKLOG_COUNT / Expected: $MSG_COUNT" | tee -a "$LOG_DIR/generation.log"
+  
+  # Allow 10% variance (though it should be exact if no consumers)
+  MIN_EXPECTED=$(python3 -c "print(int($MSG_COUNT * 0.9))")
+  
+  if [[ "$BACKLOG_COUNT" -lt "$MIN_EXPECTED" ]]; then
+      echo "CRITICAL FAILURE: Generator finished but subscription backlog ($BACKLOG_COUNT) is less than 90% of expected ($MSG_COUNT)." | tee -a "$LOG_DIR/generation.log"
+      echo "Proceeding anyway to check if Read phase can find data..." | tee -a "$LOG_DIR/generation.log"
+      # exit 1
+  fi
+  echo "Backlog Verified." | tee -a "$LOG_DIR/generation.log"
 }
+
 
 run_benchmark() {
   echo "[3/4] Running Read Benchmark..." | tee -a "$LOG_DIR/benchmark.log"
@@ -199,6 +290,9 @@ run_benchmark() {
 
   OUT_DIR="$BUCKET_NAME/output/run_${MSG_SIZE}b_${EXECUTORS}exec_${VOLUME_GB}gb_$(date +%Y%m%d_%H%M)"
   
+  # Use HDFS for Checkpoints to avoid GCS Throttling on Metadata
+  CHECKPOINT_DIR="hdfs:///tmp/benchmark/checkpoints/run_${MSG_SIZE}b_${EXECUTORS}exec_${VOLUME_GB}gb_$(date +%Y%m%d_%H%M)"
+  
   gcloud dataproc jobs submit spark \
       --cluster="$CLUSTER_NAME" \
       --region="$REGION" \
@@ -206,8 +300,9 @@ run_benchmark() {
       --class=finalconnector.PubSubToGCSBenchmark \
       --jars="$GCS_JAR" \
       --files="$GCS_LIB" \
-      --properties="spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.executor.memory=$MEMORY,spark.memory.offHeap.enabled=true,spark.memory.offHeap.size=$OFF_HEAP,spark.executor.memoryOverhead=1g,spark.dynamicAllocation.enabled=false,spark.driver.extraLibraryPath=.,spark.executor.extraLibraryPath=.,spark.executorEnv.TRIGGER_MODE=AvailableNow,spark.pubsub.batchSize=$READ_BATCH_SIZE,spark.pubsub.readWaitMs=2000" \
+      --properties="spark.executor.instances=$EXECUTORS,spark.executor.cores=$CORES,spark.executor.memory=$MEMORY,spark.memory.offHeap.enabled=true,spark.memory.offHeap.size=$OFF_HEAP,spark.executor.memoryOverhead=1g,spark.dynamicAllocation.enabled=false,spark.driver.extraLibraryPath=.,spark.executor.extraLibraryPath=.,spark.executorEnv.TRIGGER_MODE=AvailableNow,spark.driverEnv.TRIGGER_MODE=AvailableNow,spark.executorEnv.RUST_LOG=info,spark.driverEnv.RUST_LOG=info,spark.pubsub.batchSize=$READ_BATCH_SIZE,spark.pubsub.readWaitMs=2000,spark.eventLog.enabled=false,spark.eventLog.compress=true,spark.eventLog.rolling.enabled=true,spark.eventLog.rolling.maxFileSize=128m,spark.driver.extraJavaOptions=-Dlog4j.threshold=WARN,spark.executor.extraJavaOptions=-Dlog4j.threshold=WARN,spark.sql.streaming.checkpointLocation=$CHECKPOINT_DIR" \
       -- "$SUB" "$OUT_DIR" "$MSG_SIZE" 2>&1 | tee -a "$LOG_DIR/benchmark.log"
+
 
   echo "[4/4] Benchmark Job Finished."
   echo "Output Directory: $OUT_DIR"

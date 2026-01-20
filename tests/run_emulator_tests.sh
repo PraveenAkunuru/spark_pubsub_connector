@@ -79,10 +79,19 @@ for i in {1..1000}; do
     -d "{\"messages\": [{\"data\": \"${MSG_DATA}\"}]}" > /dev/null
 done
 
+# Publish 100 Messages to throughput-topic for ThroughputIntegrationTest
+echo "Publishing 100 Messages to throughput-topic..."
+for i in {1..100}; do
+  MSG_DATA=$(echo -n "{\"id\": $i, \"data\": \"throughput_value_$i\"}" | base64)
+  curl -s -X POST "http://localhost:${EMULATOR_PORT}/v1/projects/throughput-test-project/topics/throughput-topic:publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"messages\": [{\"data\": \"${MSG_DATA}\"}]}" > /dev/null
+done
+
 # Run Tests
 echo "Running SBT Tests..."
 # Use environment JAVA_HOME if set, otherwise default to 17
-if [ -z "$JAVA_HOME" ]; then
+if [ -z "${JAVA_HOME:-}" ]; then
     export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 fi
 echo "Using JAVA_HOME: $JAVA_HOME"
@@ -101,11 +110,16 @@ JPMS_FLAGS="--add-opens=java.base/java.lang=ALL-UNNAMED \
   --add-opens=java.base/sun.security.action=ALL-UNNAMED \
   --add-opens=java.base/sun.util.calendar=ALL-UNNAMED \
   --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED \
+  --add-opens=jdk.unsupported/sun.misc=ALL-UNNAMED \
   --add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED \
   --add-opens=java.base/sun.util.logging=ALL-UNNAMED"
+
+export RUST_LOG=info
+export RUST_BACKTRACE=1
 
 cd ../spark
 $JAVA_HOME/bin/java $JPMS_FLAGS \
     -Dorg.apache.arrow.memory.util.MemoryUtil.DISABLE_UNSAFE_DIRECT_MEMORY_ACCESS=false \
-    -jar sbt-launch.jar "spark35/testOnly *EmulatorIntegrationTest *StructuredReadTest" 2>&1 | tee "$LOG_FILE"
+    -Dpubsub.msg.count=100 \
+    -jar sbt-launch.jar "testOnly *ThroughputIntegrationTest" 2>&1 | tee "$LOG_FILE"
 

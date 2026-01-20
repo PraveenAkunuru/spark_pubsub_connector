@@ -16,7 +16,8 @@ use crate::core::metrics::{
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-type PublishJoinHandle = tokio::task::JoinHandle<Result<(), String>>;
+type PublishJoinHandle = tokio::task::JoinHandle<Result<Vec<String>, String>>;
+
 
 /// A client for publishing batches of messages to a Pub/Sub topic.
 #[derive(Clone)]
@@ -99,12 +100,16 @@ impl PublisherClient {
         let task = tokio::spawn(async move {
             let results = futures::future::join_all(awaiters).await;
             let mut failed = false;
+            let mut ids = Vec::with_capacity(results.len());
 
             for res in results {
-                if let Err(e) = res {
-                    log::error!("Rust: Publish error: {:?}", e);
-                    WRITE_ERRORS.fetch_add(1, Ordering::Relaxed);
-                    failed = true;
+                match res {
+                    Ok(id) => ids.push(id),
+                    Err(e) => {
+                        log::error!("Rust: Publish error: {:?}", e);
+                        WRITE_ERRORS.fetch_add(1, Ordering::Relaxed);
+                        failed = true;
+                    }
                 }
             }
 
@@ -114,9 +119,10 @@ impl PublisherClient {
             if failed {
                 Err("One or more messages in batch failed to publish".to_string())
             } else {
-                Ok(())
+                Ok(ids)
             }
         });
+
 
         // Check for finished tasks and verify success to prevent accumulation
         // Apply backpressure if too many tasks are pending
@@ -131,7 +137,11 @@ impl PublisherClient {
             for h in t.drain(..) {
                 if h.is_finished() {
                     match h.await {
-                        Ok(Ok(())) => {} // Success
+                        Ok(Ok(ids)) => {
+                            if !ids.is_empty() {
+                                log::info!("Rust: Background Batch Success. Msg Count: {}. First ID: {}", ids.len(), ids[0]);
+                            }
+                        } 
                         Ok(Err(e)) => error = Some(format!("Background task failed: {}", e)),
                         Err(e) => error = Some(format!("Background task panic: {:?}", e)),
                     }
@@ -178,16 +188,30 @@ impl PublisherClient {
             return Ok(());
         }
 
-        log::info!("Rust: Flushing {} pending publish tasks...", tasks.len());
+        let msg = format!("Rust: Flushing {} pending publish tasks...", tasks.len());
+        log::info!("{}", msg);
+        eprintln!("{}", msg);
+
         let results = futures::future::join_all(tasks).await;
 
         let mut any_error = None;
+        let mut success_count = 0;
 
-        for join_res in results {
+        for (i, join_res) in results.into_iter().enumerate() {
             match join_res {
                 Ok(task_res) => {
-                    if let Err(e) = task_res {
-                        any_error = Some(e);
+                    match task_res {
+                        Ok(ids) => {
+                            if i < 3 && !ids.is_empty() {
+                                let id_msg = format!("Rust: Acked Batch {} First ID: {}", i, ids[0]);
+                                log::info!("{}", id_msg);
+                                eprintln!("{}", id_msg);
+                            }
+                            success_count += ids.len();
+                        }
+                        Err(e) => {
+                             any_error = Some(e);
+                        }
                     }
                 }
                 Err(e) => {
@@ -197,10 +221,31 @@ impl PublisherClient {
         }
 
         if let Some(e) = any_error {
-            log::error!("Rust: Flush failed: {}", e);
+            let err_msg = format!("Rust: Flush failed: {}", e);
+            log::error!("{}", err_msg);
+            eprintln!("{}", err_msg);
             return Err(e);
         }
+        
+        let success_msg = format!("Rust: Flush success. {} messages confirmed.", success_count);
+        log::info!("{}", success_msg);
+        eprintln!("{}", success_msg);
+        Ok(())
+    }
 
+    /// Closes the client, flushing pending messages and shutting down the publisher.
+    pub async fn close(&self) -> Result<(), String> {
+        eprintln!("Rust: PublisherClient closing...");
+        log::info!("Rust: PublisherClient closing...");
+        self.flush(Duration::from_secs(30)).await?;
+        
+        // Clone publisher to call shutdown (which consumes self)
+        let mut pub_clone = self.publisher.clone();
+        pub_clone.shutdown().await;
+
+        eprintln!("Rust: Publisher shutdown complete.");
+        log::info!("Rust: Publisher shutdown complete.");
         Ok(())
     }
 }
+

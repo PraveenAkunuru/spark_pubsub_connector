@@ -738,6 +738,17 @@ mod sink_jni {
                         }
                     };
 
+                    let msg_count = msgs.len();
+                    let log_msg = format!("Rust: writeBatch received {} messages", msg_count);
+                    log::info!("{}", log_msg);
+                    
+                    if msg_count == 0 {
+                        eprintln!("{}", log_msg);
+                    } else {
+                         let payload_log = format!("Rust: First message payload size: {} bytes", msgs[0].data.len());
+                         log::info!("{}", payload_log);
+                    }
+
                     let res = writer
                         .rt
                         .block_on(async { writer.client.publish_batch(msgs).await });
@@ -805,31 +816,30 @@ mod sink_jni {
             self,
             _env: &JNIEnv,
             writer_ptr: jlong,
-            timeout_ms: jlong,
+            _timeout_ms: jlong,
         ) -> i32 {
             crate::safe_jni_call(-99, || {
                 if writer_ptr != 0 {
-                    // SAFETY: writer_ptr is the raw pointer to RustPartitionWriter created in init() via Box::into_raw.
-                    // It is guaranteed to be valid until close() consumes and drops it.
-                    // We verify it's not null before conversion.
+                    // SAFETY: writer_ptr is the raw pointer...
                     let writer =
                         unsafe { Box::from_raw(writer_ptr as *mut crate::RustPartitionWriter) };
-                    let flush_res = writer.rt.block_on(async {
-                        let timeout = if timeout_ms > 0 {
-                            std::time::Duration::from_millis(timeout_ms as u64)
-                        } else {
-                            std::time::Duration::from_secs(30)
-                        };
-
-                        if let Err(e) = writer.client.flush(timeout).await {
-                            log::error!("Rust: Writer close flush failed: {}", e);
-                            return -1;
-                        }
-                        0
+                    
+                    log::info!("Rust: NativeWriter.close called for partition {}", writer.partition_id);
+                    
+                    let res = writer.rt.block_on(async {
+                         writer.client.close().await
                     });
-                    return flush_res;
+
+                    match res {
+                        Ok(_) => 0,
+                        Err(e) => {
+                             log::error!("Rust: NativeWriter close failed: {}", e);
+                             -1
+                        }
+                    }
+                } else {
+                    0
                 }
-                0
             })
         }
     }

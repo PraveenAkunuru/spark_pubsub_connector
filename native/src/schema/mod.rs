@@ -145,3 +145,48 @@ pub fn parse_simple_schema(json: &str) -> Option<Arc<Schema>> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_processing_config_defaults() {
+        let json = "{}";
+        let config = parse_processing_config(json).expect("Failed to parse empty config");
+        assert_eq!(config.format, DataFormat::Json);
+        assert!(config.arrow_schema.is_none());
+    }
+
+    #[test]
+    fn test_parse_processing_config_with_columns() {
+        let json = r#"{
+            "columns": [
+                {"name": "col1", "type": "string"},
+                {"name": "col2", "type": "int"}
+            ],
+            "format": "json"
+        }"#;
+        let config = parse_processing_config(json).expect("Failed to parse config with columns");
+        assert_eq!(config.format, DataFormat::Json);
+        assert!(config.arrow_schema.is_some());
+        
+        let schema = config.arrow_schema.unwrap();
+        assert_eq!(schema.fields().len(), 2);
+        assert_eq!(schema.field(0).name(), "col1");
+        assert_eq!(schema.field(0).data_type(), &DataType::Utf8);
+        assert_eq!(schema.field(1).name(), "col2");
+        assert_eq!(schema.field(1).data_type(), &DataType::Int32);
+    }
+    
+    #[test]
+    fn test_parse_processing_config_avro() {
+        let json = r#"{
+            "format": "avro",
+            "avroSchema": "{\"type\":\"record\",\"name\":\"test\",\"fields\":[]}"
+        }"#;
+        let config = parse_processing_config(json).expect("Failed to parse avro config");
+        assert_eq!(config.format, DataFormat::Avro);
+        assert!(config.avro_schema.is_some());
+    }
+}

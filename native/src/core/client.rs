@@ -8,8 +8,8 @@ use futures::StreamExt;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_googleapis::pubsub::v1::ReceivedMessage as LowLevelMessage;
 use google_cloud_pubsub::client::{Client, ClientConfig};
-use google_cloud_pubsub::subscriber::SubscriberConfig;
-use google_cloud_pubsub::subscription::SubscribeConfig;
+// use google_cloud_pubsub::subscriber::SubscriberConfig;
+// use google_cloud_pubsub::subscription::SubscribeConfig;
 use once_cell::sync::Lazy;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -72,14 +72,8 @@ impl PubSubClient {
 
         let subscription = client.subscription(&full_sub_name);
 
-        let sub_config = SubscriberConfig {
-            max_outstanding_messages: 10_000,
-            max_outstanding_bytes: 200 * 1024 * 1024,
-            ..Default::default()
-        };
-
-        let config = SubscribeConfig::default().with_subscriber_config(sub_config);
-
+        // Use Default Config (None) creates a working stream for large messages (>1KB).
+        // Previous custom SubConfig caused silent drops for messages >1KB.
         // Channel to bridge Library -> Spark (Deep buffer)
         let (tx, rx) = mpsc::channel::<LowLevelMessage>(20_000);
         let sub_clone = subscription.clone();
@@ -91,7 +85,9 @@ impl PubSubClient {
                 sub_name_clone
             );
 
-            let mut stream = match sub_clone.subscribe(Some(config)).await {
+            // Use Default Config (None) creates a working stream for large messages (>1KB).
+            // Previous custom SubConfig caused silent drops for messages >1KB.
+            let mut stream = match sub_clone.subscribe(None).await {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Rust: Subscription failed for {}: {:?}", sub_name_clone, e);

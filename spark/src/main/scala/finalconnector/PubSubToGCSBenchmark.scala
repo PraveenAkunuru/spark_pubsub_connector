@@ -7,6 +7,43 @@ import org.apache.spark.sql.streaming.StreamingQueryListener._
 import org.apache.spark.sql.types._
 import java.util.concurrent.atomic.AtomicLong
 
+import org.apache.spark.scheduler.{SparkListener, SparkListenerExecutorMetricsUpdate}
+import org.apache.spark.executor.ExecutorMetrics
+import java.util.concurrent.ConcurrentHashMap
+import scala.collection.JavaConverters._
+
+class MetricsRegistry {
+  private val executorMetrics = new ConcurrentHashMap[String, (Long, Long)]() // RSS, Heap
+
+  def update(execId: String, rss: Long, heap: Long): Unit = {
+    executorMetrics.put(execId, (rss, heap))
+  }
+
+  def getClusterMetrics(): (Long, Long, Int) = {
+    var totalRss = 0L
+    var totalHeap = 0L
+    val count = executorMetrics.size()
+    val iter = executorMetrics.values().iterator()
+    while (iter.hasNext) {
+      val (rss, heap) = iter.next()
+      totalRss += rss
+      totalHeap += heap
+    }
+    (totalRss, totalHeap, count)
+  }
+}
+
+class SparkResourceListener(registry: MetricsRegistry) extends SparkListener {
+  override def onExecutorMetricsUpdate(executorMetricsUpdate: SparkListenerExecutorMetricsUpdate): Unit = {
+    val execId = executorMetricsUpdate.execId
+    executorMetricsUpdate.executorUpdates.values.foreach { metrics =>
+      val rss = try { metrics.getMetricValue("ProcessTreeJVMRSS") } catch { case _: Exception => 0L }
+      val heap = try { metrics.getMetricValue("JVMHeapMemory") } catch { case _: Exception => 0L }
+      registry.update(execId, rss, heap)
+    }
+  }
+}
+
 /**
  * Benchmarks Read Throughput from Pub/Sub to GCS Parquet.
  * Usage: PubSubToGCSBenchmark <subscriptionId> <outputDir> [msgSizeBytes]
@@ -28,7 +65,12 @@ object PubSubToGCSBenchmark {
 
     // Attach Listener for Metrics
     val reportIntervalMin = sys.env.getOrElse("BENCHMARK_REPORT_INTERVAL_MIN", "1").toInt
-    val listener = new BenchmarkListener(reportIntervalMin, msgSizeBytes)
+    
+    // Register Resource Listener
+    val metricsRegistry = new MetricsRegistry()
+    spark.sparkContext.addSparkListener(new SparkResourceListener(metricsRegistry))
+    
+    val listener = new BenchmarkListener(reportIntervalMin, msgSizeBytes, metricsRegistry)
     spark.streams.addListener(listener)
 
     System.err.println(s"Starting Benchmark: Sub=$subscriptionId, Out=$outputDir, MsgSize=${msgSizeBytes}B")
@@ -92,12 +134,21 @@ object PubSubToGCSBenchmark {
   }
 }
 
-class BenchmarkListener(reportIntervalMin: Int, msgSizeBytes: Long) extends StreamingQueryListener {
+class BenchmarkListener(reportIntervalMin: Int, msgSizeBytes: Long, metricsRegistry: MetricsRegistry) extends StreamingQueryListener {
   val totalRows = new AtomicLong(0)
   
   private val startTime = System.currentTimeMillis()
   private var lastReportTime = startTime
   private val reportIntervalMs = reportIntervalMin * 60 * 1000L
+
+  // Metrics Access
+  val osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean
+  // Try to cast to com.sun.management.OperatingSystemMXBean for cpu load if available
+  val sunOsBean = try {
+    osBean.asInstanceOf[com.sun.management.OperatingSystemMXBean]
+  } catch {
+    case _: Throwable => null
+  }
 
   override def onQueryStarted(event: QueryStartedEvent): Unit = {
     System.err.println(s"BenchmarkListener started. Reporting every $reportIntervalMin minutes.")
@@ -116,14 +167,34 @@ class BenchmarkListener(reportIntervalMin: Int, msgSizeBytes: Long) extends Stre
       val estimatedMbTotal = currentTotalRows * msgSizeBytes / (1024.0 * 1024.0)
       val avgMbS = estimatedMbTotal / elapsedTotalSec
 
+      // Collect System Metrics
+      val cpuLoad = if (sunOsBean != null) f"${sunOsBean.getProcessCpuLoad * 100}%.2f%%" else "N/A"
+      val memUsed = Runtime.getRuntime.totalMemory() - Runtime.getRuntime.freeMemory()
+      val memUsedMb = memUsed / (1024 * 1024)
+      val memMaxMb = Runtime.getRuntime.maxMemory() / (1024 * 1024)
+      
+      // Driver Metrics
+      val driverCpu = if (sunOsBean != null) sunOsBean.getProcessCpuLoad * 100 else -1.0
+      val runtime = Runtime.getRuntime
+      val driverHeap = runtime.totalMemory() - runtime.freeMemory()
+      
+      // Cluster Metrics
+      val (clusterRss, clusterHeap, execCount) = metricsRegistry.getClusterMetrics()
+      val clusterRssMB = clusterRss / 1024 / 1024
+      val clusterHeapMB = clusterHeap / 1024 / 1024
+      
       System.err.println(s"--- Benchmark Status Update ---")
       System.err.println(s"Time: ${new java.util.Date(now)}")
       System.err.println(f"Elapsed: $elapsedTotalSec%.2fs")
       System.err.println(s"Total Rows: $currentTotalRows")
       System.err.println(f"Avg Throughput: $avgThroughput%.2f rows/sec ($avgMbS%.2f MB/s)")
       System.err.println(f"Current Batch Throughput: ${progress.processedRowsPerSecond}%.2f rows/sec")
+      System.err.println(f"Driver CPU Load: $cpuLoad")
+      System.err.println(f"Driver Heap Used: ${memUsedMb}MB / ${memMaxMb}MB")
+      System.err.println(s"Cluster Active Executors: $execCount")
+      System.err.println(s"Cluster Total RSS: ${clusterRssMB}MB")
+      System.err.println(s"Cluster Total Heap: ${clusterHeapMB}MB")
       
-      // Attempt to get custom metrics if available
       val metrics = progress.observedMetrics
       if (!metrics.isEmpty) {
          System.err.println(s"Custom Metrics: $metrics")
