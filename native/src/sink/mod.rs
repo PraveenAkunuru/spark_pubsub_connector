@@ -65,7 +65,12 @@ impl PublisherClient {
         _batch_bytes: Option<usize>,
         batch_duration_ms: Option<u64>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let config = ClientConfig::default().with_auth().await?;
+        let mut config = ClientConfig::default().with_auth().await?;
+        config.project_id = Some(project_id.to_string());
+        
+        // In Emulator mode, auth is disabled/ignored by the library if PUBSUB_EMULATOR_HOST is set,
+        // but project_id alignment is critical.
+        
         let client = Client::new(config).await?;
         let full_topic_name = if topic_id.contains('/') {
             topic_id.to_string()

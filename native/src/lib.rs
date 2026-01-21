@@ -8,7 +8,7 @@ use robusta_jni::bridge;
 mod core;
 mod diagnostics;
 mod schema;
-mod sink;
+pub mod sink;
 mod source;
 
 /// Public API for testing and examples.
